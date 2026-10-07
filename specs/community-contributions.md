@@ -252,15 +252,17 @@ metadata it sent instead of `rows` and `tag`.
 ## What State must provide
 
 This repo cannot ship until `sdkman-state` has the following, specced in
-[`do/sdkman-state/specs/community-role.md`](../../../do/sdkman-state/specs/community-role.md):
+[`community-role.md`](../../../do/sdkman-state/specs/community-role.md) and
+[`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md):
 
 - **A `community` role** for every candidate that is neither java nor in a live vendor's
   scope. It can do to candidates, versions and tags whatever the admin can, deletes included,
   but cannot manage vendors. This repo uses only part of that: it never deletes, and only
   moves `lts`. Those limits are this repo's rules, enforced by the check and the apply, not
   by State.
-- **Public validation** that never writes, needs no login, and is not throttled. It answers
-  with the status the community role's write would get, for a registration or for a release
+- **Public validation** that never writes, needs no login, and is not throttled. It applies
+  the write routes' own rules and refuses off-limits candidates, answering with the status a
+  write would get, for a registration or for a release
   as a whole (its versions plus optional default), listing every failure at once. A release's
   default may name a version in the same release. A default naming any other version is not
   checked by State; the check confirms it exists through State's public read routes.
