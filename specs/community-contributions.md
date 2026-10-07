@@ -157,9 +157,10 @@ controls.
 3. **Vendor-owned candidates are refused.** A candidate in an active vendor's scope in State
    is published by that vendor through the Vendor API, and a request for it fails the check.
    The vendor remains its only writer.
-4. **Nothing is deleted or hidden.** Deleting a version or a candidate is an admin act
-   outside this repo. A request can overwrite a version (a new URL or checksum) by posting it
-   again, but never remove one.
+4. **Nothing is deleted or hidden, for now.** No request kind deletes a version or a
+   candidate; a maintainer does that directly. A request can overwrite a version (a new URL or
+   checksum) by posting it again, but never remove one. State's community role already
+   allows deletes, so adding a delete request later needs no State release.
 5. **Unknown fields are rejected.** Parsing is strict, so a typo fails the check and is never
    silently ignored.
 6. **`UNIVERSAL` excludes every other platform for one version.** A version is either one
@@ -198,7 +199,8 @@ The check validates only the request the PR adds. It:
 
 1. confirms the PR adds exactly one file under `requests/` and changes nothing else;
 2. checks the file name (rule 1), parses the file strictly, and confirms its directory and kind match its content;
-3. asks State's public validation whether the request would be accepted;
+3. asks State's public validation whether the request would be accepted, and, when `default`
+   names a version outside the release, confirms through State's public read routes that it exists;
 4. downloads every archive and applies rules 6 to 8;
 5. posts one PR comment listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched.
 
@@ -249,15 +251,19 @@ metadata it sent instead of `rows` and `tag`.
 
 ## What State must provide
 
-This repo cannot ship until `sdkman-state` has the following, specced in that repo:
+This repo cannot ship until `sdkman-state` has the following, specced in
+[`do/sdkman-state/specs/community-role.md`](../../../do/sdkman-state/specs/community-role.md):
 
-- **A `community` role** that can register candidates, update their metadata, post new
-  versions and overwrite existing ones, and move the `lts` tag. It cannot delete anything
-  and cannot change visibility, and it is refused java and every vendor-owned candidate.
-- **Public validation** that never writes and needs no login. It answers whether a
-  registration, or a release (its versions plus optional default), would be accepted from
-  the `community` role, and it reports every failure at once. A release's default may name a
-  version in the same release.
+- **A `community` role** for every candidate that is neither java nor in a live vendor's
+  scope. It can do to candidates, versions and tags whatever the admin can, deletes included,
+  but cannot manage vendors. This repo uses only part of that: it never deletes, and only
+  moves `lts`. Those limits are this repo's rules, enforced by the check and the apply, not
+  by State.
+- **Public validation** that never writes, needs no login, and is not throttled. It answers
+  with the status the community role's write would get, for a registration or for a release
+  as a whole (its versions plus optional default), listing every failure at once. A release's
+  default may name a version in the same release. A default naming any other version is not
+  checked by State; the check confirms it exists through State's public read routes.
 
 ## Tooling
 
