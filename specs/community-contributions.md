@@ -154,8 +154,9 @@ controls.
    earlier than its candidate's latest applied request, so a stale or back-dated request can
    never be ordered ahead of what State already holds.
 2. **java is refused.** DISCO owns java. Any request naming it fails the check.
-3. **Vendor-owned candidates are refused.** A candidate in an active vendor's scope in State
-   is published by that vendor through the Vendor API, and a request for it fails the check.
+3. **Vendor-published candidates are not refused.** A candidate a vendor also publishes
+   through the Vendor API is open to requests here. A request that would overwrite a vendor's
+   own rows is for the reviewing maintainer to catch.
    The vendor remains its only writer.
 4. **Nothing is deleted or hidden, for now.** No request kind deletes a version or a
    candidate; a maintainer does that directly. A request can overwrite a version (a new URL or
@@ -255,13 +256,12 @@ This repo cannot ship until `sdkman-state` has the following, specced in
 [`community-role.md`](../../../do/sdkman-state/specs/community-role.md) and
 [`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md):
 
-- **A `community` role** for every candidate that is neither java nor in a live vendor's
-  scope. It can do to candidates, versions and tags whatever the admin can, deletes included,
+- **A `community` role** for every candidate except java. It can do to candidates, versions and tags whatever the admin can, deletes included,
   but cannot manage vendors. This repo uses only part of that: it never deletes, and only
   moves `lts`. Those limits are this repo's rules, enforced by the check and the apply, not
   by State.
 - **Public validation** that never writes, needs no login, and is not throttled. It applies
-  the write routes' own rules and refuses off-limits candidates, answering with the status a
+  the write routes' own rules and refuses java, answering with the status a
   write would get, for a registration or for a release
   as a whole (its versions plus optional default), listing every failure at once. A release's
   default may name a version in the same release. A default naming any other version is not
@@ -351,11 +351,6 @@ Feature: Community contributions
     When a contributor opens a release PR for "java"
     Then the check fails
 
-  Scenario: A vendor-owned candidate is refused
-    Given a vendor's scope includes "gradle"
-    When a contributor opens a release PR for "gradle"
-    Then the check fails, naming the Vendor API
-
   Scenario: An archive without bin/ fails the check
     Given an archive whose base directory holds no bin/
     When the check runs
@@ -428,7 +423,7 @@ Feature: Community contributions
 
 ## Out of Scope
 
-- java, and every vendor-owned candidate.
+- java.
 - Deleting or hiding versions, and deleting candidates.
 - Tags other than `lts`, and distributions.
 - Installing archives in CI (a smoke `sdk install`).
@@ -443,7 +438,7 @@ Feature: Community contributions
 - [ ] `contrib new register` and `contrib new release` write correctly named skeletons that pass the check once their placeholders are filled
 - [ ] A PR adding more than one file, editing an existing request, or touching `.applied/` fails the check
 - [ ] Unknown fields, a path that doesn't match the `candidate`, and a file mixing `register` with `versions` or `default` each fail the check
-- [ ] java and vendor-owned candidates fail the check
+- [ ] java fails the check
 - [ ] Each hard archive rule fails the check, and each convention only warns
 - [ ] Any declared `md5`, `sha256` or `sha512` that does not match the download fails the check, and fails the apply before anything for that request is written
 - [ ] Every row written to State carries a computed sha256, plus any declared `md5` or `sha512`
