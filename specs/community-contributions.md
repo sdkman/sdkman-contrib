@@ -184,8 +184,8 @@ controls.
    | `bin/` holds no executable file (any platform except `WINDOWS_X64`) | |
 
 9. **Every State rule is checked by State.** Version syntax, the candidate registry,
-   description rules and the role's permissions are evaluated by State's public validation,
-   never re-implemented here. Rules live in one place and can't drift.
+   description rules and the java refusal are evaluated by State's validation twins, never
+   re-implemented here. Rules live in one place and can't drift.
 10. **The default is applied last.** Within a release, the `lts` tag moves only after every
    version in the request is written, so the default never points at a missing row. It is
    set on every platform row of the default version.
@@ -200,7 +200,8 @@ The check validates only the request the PR adds. It:
 
 1. confirms the PR adds exactly one file under `requests/` and changes nothing else;
 2. checks the file name (rule 1), parses the file strictly, and confirms its directory and kind match its content;
-3. asks State's public validation whether the request would be accepted, and, when `default`
+3. posts each body the apply will post to its State validation twin (one per row for a
+   release) and collects every answer, and, when `default`
    names a version outside the release, confirms through State's public read routes that it exists;
 4. downloads every archive and applies rules 6 to 8;
 5. posts one PR comment listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched.
@@ -224,6 +225,10 @@ For each pending request, in file-name order:
   fails here, before anything for that request is written. It then posts each version with
   its checksums, then moves the `lts` tag.
 - **Then:** commits the receipt.
+
+The run logs in as the community account once at the start, and logs in again whenever its
+token expires (10 minutes today), so a release slow enough to outlast one token still
+applies in a single run. State throttles only login, so this never trips the limit.
 
 On the first failure the run stops, fails, and leaves that request and everything after it
 pending. The failure reaches the maintainer through the org's standard failure alert (see
@@ -256,16 +261,17 @@ This repo cannot ship until `sdkman-state` has the following, specced in
 [`community-role.md`](../../../do/sdkman-state/specs/community-role.md) and
 [`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md):
 
-- **A `community` role** for every candidate except java. It can do to candidates, versions and tags whatever the admin can, deletes included,
-  but cannot manage vendors. This repo uses only part of that: it never deletes, and only
-  moves `lts`. Those limits are this repo's rules, enforced by the check and the apply, not
-  by State.
-- **Public validation** that never writes, needs no login, and is not throttled. It applies
-  the write routes' own rules and refuses java, answering with the status a
-  write would get, for a registration or for a release
-  as a whole (its versions plus optional default), listing every failure at once. A release's
-  default may name a version in the same release. A default naming any other version is not
-  checked by State; the check confirms it exists through State's public read routes.
+- **A `community` role** for every candidate except java. It can do to candidates, versions
+  and tags whatever the admin can, deletes included, but cannot manage vendors. This repo uses
+  only part of that: it never deletes, and only moves `lts`. Those limits are this repo's
+  rules, enforced by the check and the apply, not by State.
+- **Public validation**: open twins of the write routes, `POST /validate/candidates` and
+  `POST /validate/versions`. Each takes exactly its write route's body, runs the same
+  validation, and answers as the write would (`204` on success), without writing or a login.
+  java is refused with `403`. The check posts exactly the bodies the apply will post: one
+  call for a registration, one per row for a release. Validation never sees a release's
+  default; when it names a version outside the release, the check confirms it exists through
+  State's public read routes.
 
 ## Tooling
 
@@ -318,11 +324,13 @@ check alerts nobody; the contributor reads the check's own comment instead.
 1. `sdkman-state` ships the `community` role and public validation.
 2. This repo ships the check, the apply, the bot and a contributor guide (the README), with
    `main` protected.
-3. A maintainer registers a candidate end to end through the repo before announcing it.
-4. Each of the 17 closed `sdkman-db-migrations` PRs gets a comment linking the guide, with
+3. Confirm in Cloudflare that no edge rate-limit rule on `state.sdkman.io` throttles the
+   validation routes or community writes; State itself throttles only login.
+4. A maintainer registers a candidate end to end through the repo before announcing it.
+5. Each of the 17 closed `sdkman-db-migrations` PRs gets a comment linking the guide, with
    the YAML version of what it asked for. Their authors resubmit; nobody ports them for
    them.
-5. The guide is posted in Discord, and the archived `sdkman-db-migrations` README points at
+6. The guide is posted in Discord, and the archived `sdkman-db-migrations` README points at
    it.
 
 ## Examples
