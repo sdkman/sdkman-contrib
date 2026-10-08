@@ -153,7 +153,8 @@ controls.
    that doesn't match the pattern fails the check. So does a timestamp in the future, or one
    earlier than its candidate's latest applied request, so a stale or back-dated request can
    never be ordered ahead of what State already holds.
-2. **java is refused.** DISCO owns java. Any request naming it fails the check.
+2. **java is refused.** DISCO owns java. Any request naming it fails the check. This is this
+   repo's rule, checked offline; State does not refuse java to the community role.
 3. **Vendor-published candidates are not refused.** A candidate a vendor also publishes
    through the Vendor API is open to requests here. A request that would overwrite a vendor's
    own rows is for the reviewing maintainer to catch.
@@ -184,11 +185,14 @@ controls.
    | `bin/` holds no executable file (any platform except `WINDOWS_X64`) | |
 
 9. **Every State rule is checked by State.** Version syntax, the candidate registry,
-   description rules and the java refusal are evaluated by State's validation twins, never
-   re-implemented here. Rules live in one place and can't drift.
-10. **The default is applied last.** Within a release, the `lts` tag moves only after every
-   version in the request is written, so the default never points at a missing row. It is
-   set on every platform row of the default version.
+   and description rules are evaluated by State's validation twins, never re-implemented
+   here. Rules live in one place and can't drift.
+10. **The default rides on its own rows.** When the default is a version in the release,
+    each of its platform rows is posted with `tags: ["lts"]`, so the tag lands with the row
+    and never points at a missing one; no extra call is made. Every other row is posted with
+    no `tags` field, which leaves its tags untouched. When the default names an existing
+    version outside the release, the apply moves `lts` on each of that version's platform rows
+    with State's tag route, after every version in the request is written.
 11. **Receipts are written only by the bot.** A contributor PR that touches `.applied/` fails
     the check. The bot may only add files under `.applied/`.
 12. **The check needs no secrets.** Forks run it unchanged. Only the apply job, on `main`,
@@ -201,7 +205,8 @@ The check validates only the request the PR adds. It:
 1. confirms the PR adds exactly one file under `requests/` and changes nothing else;
 2. checks the file name (rule 1), parses the file strictly, and confirms its directory and kind match its content;
 3. posts each body the apply will post to its State validation twin (one per row for a
-   release) and collects every answer, and, when `default`
+   release) and collects every answer. Only `204` passes: any other answer, a `400`, a `404`
+   from a missing route, or a server error, fails the check. When `default`
    names a version outside the release, confirms through State's public read routes that it exists;
 4. downloads every archive and applies rules 6 to 8;
 5. posts one PR comment listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched.
@@ -222,8 +227,9 @@ For each pending request, in file-name order:
 - **Registration:** registers or updates the candidate.
 - **Release:** downloads each archive again and verifies every declared checksum against it
   (rule 7). The apply trusts nothing from the PR run: an archive that changed after review
-  fails here, before anything for that request is written. It then posts each version with
-  its checksums, then moves the `lts` tag.
+  fails here, before anything for that request is written. It then posts each row with its
+  checksums, the default's rows carrying `lts` (rule 10). A default outside the release is
+  moved last, through the tag route.
 - **Then:** commits the receipt.
 
 The run logs in as the community account once at the start, and logs in again whenever its
@@ -261,14 +267,14 @@ This repo cannot ship until `sdkman-state` has the following, specced in
 [`community-role.md`](../../../do/sdkman-state/specs/community-role.md) and
 [`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md):
 
-- **A `community` role** for every candidate except java. It can do to candidates, versions
+- **A `community` role** for every candidate. It can do to candidates, versions
   and tags whatever the admin can, deletes included, but cannot manage vendors. This repo uses
-  only part of that: it never deletes, and only moves `lts`. Those limits are this repo's
+  only part of that: it never deletes, only moves `lts`, and never touches java. Those limits are this repo's
   rules, enforced by the check and the apply, not by State.
 - **Public validation**: open twins of the write routes, `POST /validate/candidates` and
   `POST /validate/versions`. Each takes exactly its write route's body, runs the same
   validation, and answers as the write would (`204` on success), without writing or a login.
-  java is refused with `403`. The check posts exactly the bodies the apply will post: one
+  The check posts exactly the bodies the apply will post: one
   call for a registration, one per row for a release. Validation never sees a release's
   default; when it names a version outside the release, the check confirms it exists through
   State's public read routes.
@@ -417,7 +423,7 @@ Feature: Community contributions
     Given a release whose first version was written before the run failed
     When the next run applies it
     Then every version is written once
-      And the lts tag is moved last
+      And the default's rows carry the lts tag
 
   Scenario: The default moves without new versions
     Given "tomcat 11.0.15" exists in State
@@ -454,7 +460,7 @@ Feature: Community contributions
 - [ ] The check runs on fork PRs with no secrets
 - [ ] The apply runs one at a time, is never cancelled, applies pending requests in file-name order across all candidates, and stops at the first failure
 - [ ] A failed request is retried by the next run, and requests ordered after it wait
-- [ ] Within a release, every version is written before the `lts` tag moves
+- [ ] A default in the release is set by posting its rows with `tags: ["lts"]`, with no extra call; a default outside it moves through the tag route after every row is written
 - [ ] Each applied request gets exactly one receipt under `.applied/`, at the request's mirrored path, committed by the GitHub App
 - [ ] Nothing in this repo deletes or hides anything in State
 - [ ] `main` accepts changes only through maintainer-approved PRs, except the App's receipts
