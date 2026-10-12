@@ -86,7 +86,7 @@ A request lives at `requests/<candidate>/<timestamp>-<kind>-<slug>.yaml`:
 
 The timestamp leads, so names sort as text into the order they were written, with no
 colons to trip Windows checkouts. Pending requests apply in that order, comparing file names
-across every candidate directory, with the full name as the tie-break. `contrib new` stamps
+across every candidate directory, with the path relative to `requests/` as the tie-break. `contrib new` stamps
 the current time. Hand-written names are fine as long as they match.
 
 ## Request format
@@ -135,7 +135,7 @@ default: 1.2.0
 | `versions[].version` | yes | a version string State accepts for this candidate |
 | `versions[].platforms` | yes | a map from State platform id to an archive |
 | platform value | yes | either a URL, or `url` with any of `md5`, `sha256`, `sha512` (hex) |
-| `default` | no | a version in this request or already in State; becomes the `lts` tag |
+| `default` | no | a version in this request or already in State; becomes the `stable` tag |
 
 A release needs `versions`, `default`, or both. With `default` alone, it moves the default to
 a version that already exists.
@@ -144,8 +144,12 @@ Platform ids are State's, verbatim: `LINUX_X32`, `LINUX_X64`, `LINUX_ARM32HF`,
 `LINUX_ARM32SF`, `LINUX_ARM64`, `MAC_X64`, `MAC_ARM64`, `WINDOWS_X64`, `UNIVERSAL`.
 
 There is no `distribution`, `visible` or `tags` field. Distributions and hidden versions only
-exist for java, which this repo never touches. The `lts` tag is the only tag a request
+exist for java, which this repo never touches. The `stable` tag is the only tag a request
 controls.
+
+Re-posting a version replaces each of its rows whole: the row becomes visible, and its
+checksums are exactly those this request writes. Catching a re-post of a deliberately hidden
+version is the reviewer's job.
 
 ## Business Rules
 
@@ -158,7 +162,6 @@ controls.
 3. **Vendor-published candidates are not refused.** A candidate a vendor also publishes
    through the Vendor API is open to requests here. A request that would overwrite a vendor's
    own rows is for the reviewing maintainer to catch.
-   The vendor remains its only writer.
 4. **Nothing is deleted or hidden, for now.** No request kind deletes a version or a
    candidate; a maintainer does that directly. A request can overwrite a version (a new URL or
    checksum) by posting it again, but never remove one. State's community role already
@@ -183,16 +186,22 @@ controls.
    | it does not hold exactly one base directory | |
    | there is no `bin/` directly under the base directory | |
    | `bin/` holds no executable file (any platform except `WINDOWS_X64`) | |
+   | the download exceeds 500 MB, or takes longer than 10 minutes | |
+   | it unpacks to more than 2 GB, or to more than 50,000 entries | |
+
+   The size and time limits bind the apply too: an archive that breaches one there fails
+   the run before anything for that request is written.
 
 9. **Every State rule is checked by State.** Version syntax, the candidate registry,
    and description rules are evaluated by State's validation twins, never re-implemented
    here. Rules live in one place and can't drift.
-10. **The default rides on its own rows.** When the default is a version in the release,
-    each of its platform rows is posted with `tags: ["lts"]`, so the tag lands with the row
-    and never points at a missing one; no extra call is made. Every other row is posted with
-    no `tags` field, which leaves its tags untouched. When the default names an existing
-    version outside the release, the apply moves `lts` on each of that version's platform rows
-    with State's tag route, after every version in the request is written.
+10. **The default moves through the tag route, last.** Every row is posted with no `tags`
+    field, which leaves its existing tags untouched; posting `tags` would replace the row's
+    whole tag set. After every version in the request is written, the apply moves `stable`
+    onto each of the default's platform rows with State's tag route (`POST /versions/tags`),
+    which touches no other tag. This is the same whether the default is in the release or
+    already in State. `stable` is the tag State's default cascade reads first
+    ([`default-tag-cascade.md`](../../../do/sdkman-state/specs/default-tag-cascade.md)).
 11. **Receipts are written only by the bot.** A contributor PR that touches `.applied/` fails
     the check. The bot may only add files under `.applied/`.
 12. **The check needs no secrets.** Forks run it unchanged. Only the apply job, on `main`,
@@ -200,16 +209,22 @@ controls.
 
 ## The check (on every PR)
 
+A PR that touches `requests/` or `.applied/` is a request PR, and gets the check below. Any
+other PR (the `contrib` code, workflows, the README, Dependabot bumps) runs the Rust build and
+tests instead, and fails if it also touches `requests/` or `.applied/`. Both run under the one
+`Pull Requests` workflow.
+
 The check validates only the request the PR adds. It:
 
 1. confirms the PR adds exactly one file under `requests/` and changes nothing else;
 2. checks the file name (rule 1), parses the file strictly, and confirms its directory and kind match its content;
-3. posts each body the apply will post to its State validation twin (one per row for a
-   release) and collects every answer. Only `204` passes: any other answer, a `400`, a `404`
-   from a missing route, or a server error, fails the check. When `default`
-   names a version outside the release, confirms through State's public read routes that it exists;
-4. downloads every archive and applies rules 6 to 8;
-5. posts one PR comment listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched.
+3. downloads every archive, applies rules 6 to 8, and computes each archive's sha256;
+4. posts each body the apply will post, computed sha256 included, to its State validation
+   twin (one per row for a release) and collects every answer. Only `204` passes: any other
+   answer, a `400`, a `404` from a missing route, or a server error, fails the check. When
+   `default` names a version outside the release, confirms through State's public read routes
+   that it exists;
+5. writes a report listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched, to the job summary and as a run artifact. A fork PR's token is read-only, so the check cannot comment itself; the `Check Report` workflow posts the report as one PR comment.
 
 ```
 FAIL  jpx 1.2.0 LINUX_X64    no bin/ under jpx-1.2.0/
@@ -225,12 +240,15 @@ the reviewer.
 For each pending request, in file-name order:
 
 - **Registration:** registers or updates the candidate.
-- **Release:** downloads each archive again and verifies every declared checksum against it
-  (rule 7). The apply trusts nothing from the PR run: an archive that changed after review
-  fails here, before anything for that request is written. It then posts each row with its
-  checksums, the default's rows carrying `lts` (rule 10). A default outside the release is
-  moved last, through the tag route.
-- **Then:** commits the receipt.
+- **Release:** downloads each archive again, verifies every declared checksum against it
+  (rule 7), and re-runs the archive rules (rules 6 and 8). The apply trusts nothing from the
+  PR run: an archive that fails any of these fails here, before anything for that request is
+  written. A declared checksum is the only thing that pins an archive to what was reviewed.
+  An archive with none, swapped after review for one that is still well formed, is accepted
+  and written with the sha256 of what was downloaded. It then posts each row with its
+  checksums and no `tags`. The default moves last, through the tag route (rule 10).
+- **Then:** commits the receipt, runs `git pull --rebase` and pushes, before the next
+  request.
 
 The run logs in as the community account once at the start, and logs in again whenever its
 token expires (10 minutes today), so a release slow enough to outlast one token still
@@ -255,7 +273,7 @@ rows:
     sha256: 41ab...
     sha512: 7d0e...
 tag:
-  lts: 1.2.0
+  stable: 1.2.0
 ```
 
 `commit` is the merge commit that added the request. A registration's receipt carries the
@@ -269,7 +287,7 @@ This repo cannot ship until `sdkman-state` has the following, specced in
 
 - **A `community` role** for every candidate. It can do to candidates, versions
   and tags whatever the admin can, deletes included, but cannot manage vendors. This repo uses
-  only part of that: it never deletes, only moves `lts`, and never touches java. Those limits are this repo's
+  only part of that: it never deletes, only moves `stable`, and never touches java. Those limits are this repo's
   rules, enforced by the check and the apply, not by State.
 - **Public validation**: open twins of the write routes, `POST /validate/candidates` and
   `POST /validate/versions`. Each takes exactly its write route's body, runs the same
@@ -297,8 +315,9 @@ wrote requests/jpx/20261014T094057Z-release-1.2.0.yaml
 
 A contributor never has to install the binary: a correctly named, hand-written file is just
 as good. Pre-built binaries are published with each release for those who want it. The receipts are committed by a
-dedicated `sdkman-contrib` GitHub App, the only actor allowed to bypass `main`'s protection,
-which it can only use to add files under `.applied/`.
+dedicated `sdkman-contrib` GitHub App, the only actor allowed to skip `main`'s PR
+requirement. GitHub cannot limit that to one folder; the limit is `contrib apply`, the only
+code that pushes with the App, which only adds files under `.applied/`.
 
 ## GitHub workflows
 
@@ -308,11 +327,12 @@ elsewhere.
 
 | Workflow | Trigger | Job |
 |---|---|---|
-| `Pull Requests` | every PR | runs `contrib check`; no secrets |
+| `Pull Requests` | every PR | runs `contrib check` on a request PR, the Rust build and tests on any other; no secrets |
 | `Apply` | push to `main`, ignoring pushes that only touch `.applied/` | runs `contrib apply`, one run at a time, never cancelled; holds the State credential and the App token |
 | `Release` | a version tag | builds and publishes the `contrib` binaries |
-| `Workflow Failure Alert` | `workflow_run` of any workflow on `main` | `reusable-workflow-failure-alert.yml`: a failed apply (or release) notifies the maintainer through Chloé |
+| `Workflow Failure Alert` | `workflow_run` of any workflow on `main` | `reusable-workflow-failure-alert.yml`: a failed apply (or release) notifies the maintainer through the shared failure alert |
 | `Triage: Issues, Comments, PRs` | issue, comment or PR opened | `reusable-triage-events.yml` |
+| `Check Report` | `workflow_run` of `Pull Requests` | posts the check's report artifact as the PR comment; holds write permission, never runs the PR's code |
 | `Triage: Fork PR` | `workflow_run` of `Pull Requests` | `reusable-triage-fork-pr.yml`: surfaces fork PRs and their check result |
 | `Dependabot Digest` | weekly schedule | `reusable-dependabot-digest.yml`, with `pr_ci_workflow: "Pull Requests"` |
 | `Claude Code` | issue and PR comments | as in the other repos |
@@ -323,7 +343,7 @@ every receipt would start another, empty apply run.
 
 The PR workflow must be named `Pull Requests`, because the fork-PR triage and the Dependabot
 digest find it by that name. The failure alert is scoped to `main`, so a contributor's failed
-check alerts nobody; the contributor reads the check's own comment instead.
+check alerts nobody; the contributor reads the check's report comment instead.
 
 ## Rollout
 
@@ -388,6 +408,13 @@ Feature: Community contributions
     Then nothing for that request is written
       And the run fails and the request stays pending
 
+  Scenario: An undeclared archive replaced after review is re-checked at apply
+    Given a merged request declaring no checksums
+      And the archive at its URL has since been replaced by one with no bin/
+    When the apply runs
+    Then nothing for that request is written
+      And the run fails and the request stays pending
+
   Scenario: A request without checksums still gets a sha256
     Given a request declaring no checksums
     When it is applied
@@ -423,7 +450,7 @@ Feature: Community contributions
     Given a release whose first version was written before the run failed
     When the next run applies it
     Then every version is written once
-      And the default's rows carry the lts tag
+      And the default's rows carry the stable tag
 
   Scenario: The default moves without new versions
     Given "tomcat 11.0.15" exists in State
@@ -439,7 +466,7 @@ Feature: Community contributions
 
 - java.
 - Deleting or hiding versions, and deleting candidates.
-- Tags other than `lts`, and distributions.
+- Tags other than `stable`, and distributions.
 - Installing archives in CI (a smoke `sdk install`).
 - Delegating approval to candidate owners.
 - Reconciling State to match the repo, or detecting drift.
@@ -447,7 +474,7 @@ Feature: Community contributions
 
 ## Acceptance Criteria
 
-- [ ] A PR adding one well-formed request passes the check, and the check posts a per-row comment with its checksums
+- [ ] A PR adding one well-formed request passes the check, and the check's per-row report, with its checksums, is posted as a PR comment, fork PRs included
 - [ ] A file name not matching `<timestamp>-<kind>-<slug>.yaml`, a future timestamp, or one earlier than the candidate's latest applied request fails the check
 - [ ] `contrib new register` and `contrib new release` write correctly named skeletons that pass the check once their placeholders are filled
 - [ ] A PR adding more than one file, editing an existing request, or touching `.applied/` fails the check
@@ -460,9 +487,9 @@ Feature: Community contributions
 - [ ] The check runs on fork PRs with no secrets
 - [ ] The apply runs one at a time, is never cancelled, applies pending requests in file-name order across all candidates, and stops at the first failure
 - [ ] A failed request is retried by the next run, and requests ordered after it wait
-- [ ] A default in the release is set by posting its rows with `tags: ["lts"]`, with no extra call; a default outside it moves through the tag route after every row is written
+- [ ] Rows are posted with no `tags` field, and the default moves `stable` through the tag route after every row is written, leaving every other tag untouched
 - [ ] Each applied request gets exactly one receipt under `.applied/`, at the request's mirrored path, committed by the GitHub App
 - [ ] Nothing in this repo deletes or hides anything in State
-- [ ] `main` accepts changes only through maintainer-approved PRs, except the App's receipts
+- [ ] `main` accepts changes only through maintainer-approved PRs, except the receipts `contrib apply` pushes with the App
 - [ ] The repo carries the standard SDKMAN workflows, and a failed apply on `main` notifies the maintainer through the shared failure alert
 - [ ] The README is a complete contributor guide: both request kinds, the two-PR flow, the archive rules, and how to read the check's comment
