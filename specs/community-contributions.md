@@ -35,8 +35,9 @@ The release PR's check fails until then, because the candidate is not yet in the
 **One PR carries exactly one request.** It adds one file under `requests/` and changes
 nothing else. Review stays small, and an apply failure points at exactly one request.
 
-**Requests are immutable.** A merged request file is never edited or deleted. A correction
-is a new request, which overwrites what the earlier one wrote.
+**Requests are immutable.** A merged request file is never edited or deleted. A
+correction is a new request. It overwrites only the rows it posts. A platform row it leaves
+out keeps its earlier archive until a maintainer removes it.
 
 **Every PR is approved by a SDKMAN maintainer.** Approval is never delegated to candidate
 owners or vendors. `main` is protected: changes land only through approved PRs, except for
@@ -47,8 +48,13 @@ starts an apply run. Runs queue and are never cancelled. A run applies every *pe
 request in the order of their file names, which start with a UTC timestamp, across all
 candidates, and stops at the first failure. A request is pending until its
 receipt exists. A failed request therefore stays pending, is retried by the next run, and
-blocks every request ordered after it until it succeeds or a maintainer intervenes. That
+blocks every request ordered after it until it succeeds or a maintainer voids it. That
 keeps a release from landing before the registration it depends on.
+
+**A maintainer can retry or void.** `Apply` also runs on `workflow_dispatch`, which
+retries the queue. Its optional `void` input names one pending request. The bot commits
+that request's receipt with `voided: <reason>` and no `rows` or `tag`, and writes nothing
+to State. A voided request counts as applied.
 
 **Applying is safe to repeat.** Every write is an upsert, so re-running a request that half
 applied re-does the parts already applied without changing anything, then finishes the rest.
@@ -73,6 +79,7 @@ requests/
     20261008T140211Z-register-jpx.yaml
   tomcat/
     20261009T081500Z-release-11.0.15.yaml
+contrib-candidates.txt                      # candidates open to requests (rule 3)
 ```
 
 A request lives at `requests/<candidate>/<timestamp>-<kind>-<slug>.yaml`:
@@ -82,7 +89,7 @@ A request lives at `requests/<candidate>/<timestamp>-<kind>-<slug>.yaml`:
 | `<candidate>` | the directory; must match the file's `candidate` |
 | `<timestamp>` | when the request was written, in UTC, ISO 8601 basic format: `YYYYMMDDTHHMMSSZ` |
 | `<kind>` | `register` or `release`; must match the file's content |
-| `<slug>` | lowercase letters, digits, `.` and `-`; by convention the candidate for a registration and the version for a release |
+| `<slug>` | lowercase letters, digits, `.` and `-`; a gist of the request for humans, never parsed. `contrib new` derives it from the candidate (registration) or the version (release) by lowercasing it and replacing every other character with `-` |
 
 The timestamp leads, so names sort as text into the order they were written, with no
 colons to trip Windows checkouts. Pending requests apply in that order, comparing file names
@@ -147,27 +154,32 @@ There is no `distribution`, `visible` or `tags` field. Distributions and hidden 
 exist for java, which this repo never touches. The `stable` tag is the only tag a request
 controls.
 
-Re-posting a version replaces each of its rows whole: the row becomes visible, and its
-checksums are exactly those this request writes. Catching a re-post of a deliberately hidden
-version is the reviewer's job.
+Re-posting a version replaces each of its rows whole: its checksums are exactly those this
+request writes.
 
 ## Business Rules
 
 1. **File names follow the convention, and their timestamps can't jump the queue.** A name
    that doesn't match the pattern fails the check. So does a timestamp in the future, or one
    earlier than its candidate's latest applied request, so a stale or back-dated request can
-   never be ordered ahead of what State already holds.
-2. **java is refused.** DISCO owns java. Any request naming it fails the check. This is this
-   repo's rule, checked offline; State does not refuse java to the community role.
-3. **Vendor-published candidates are not refused.** A candidate a vendor also publishes
-   through the Vendor API is open to requests here. A request that would overwrite a vendor's
-   own rows is for the reviewing maintainer to catch.
+   never be ordered ahead of what State already holds. The guard holds at merge: `main`'s
+   protection requires a PR branch to be up to date with `main`, so the check re-runs against
+   the latest receipts before every merge.
+2. **java is refused.** DISCO owns java, so it is never listed in `contrib-candidates.txt`
+   (rule 3), and any request naming it fails the check.
+3. **Only listed candidates are open.** The committed `contrib-candidates.txt` lists every
+   candidate whose vendor publishes through neither State's vendor role nor the Vendor API
+   (`vendor-release`). Any request naming a candidate not on it fails the check, so a vendor
+   remains the only writer of its candidates. A maintainer adds a new candidate to the list
+   before its registration PR.
 4. **Nothing is deleted or hidden, for now.** No request kind deletes a version or a
    candidate; a maintainer does that directly. A request can overwrite a version (a new URL or
    checksum) by posting it again, but never remove one. State's community role already
    allows deletes, so adding a delete request later needs no State release.
-5. **Unknown fields are rejected.** Parsing is strict, so a typo fails the check and is never
-   silently ignored.
+5. **Unknown fields are rejected.** Parsing is strict, so a typo fails the check and is
+   never silently ignored. Every value is its scalar's exact text, so `version: 8.10` is
+   `8.10`. A block-scalar description loses its trailing newline and is otherwise posted as
+   written. `contrib new` writes `version` and `default` quoted.
 6. **`UNIVERSAL` excludes every other platform for one version.** A version is either one
    universal archive or a set of platform archives, never both.
 7. **Every archive is downloaded, and every checksum is verified against it.** A request may
@@ -186,11 +198,6 @@ version is the reviewer's job.
    | it does not hold exactly one base directory | |
    | there is no `bin/` directly under the base directory | |
    | `bin/` holds no executable file (any platform except `WINDOWS_X64`) | |
-   | the download exceeds 500 MB, or takes longer than 10 minutes | |
-   | it unpacks to more than 2 GB, or to more than 50,000 entries | |
-
-   The size and time limits bind the apply too: an archive that breaches one there fails
-   the run before anything for that request is written.
 
 9. **Every State rule is checked by State.** Version syntax, the candidate registry,
    and description rules are evaluated by State's validation twins, never re-implemented
@@ -285,9 +292,8 @@ This repo cannot ship until `sdkman-state` has the following, specced in
 [`community-role.md`](../../../do/sdkman-state/specs/community-role.md) and
 [`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md):
 
-- **A `community` role** for every candidate. It can do to candidates, versions
-  and tags whatever the admin can, deletes included, but cannot manage vendors. This repo uses
-  only part of that: it never deletes, only moves `stable`, and never touches java. Those limits are this repo's
+- **A `community` role** for every candidate, able to write candidates, versions and
+  tags. This repo uses only part of that: it never deletes, only moves `stable`, and never touches java. Those limits are this repo's
   rules, enforced by the check and the apply, not by State.
 - **Public validation**: open twins of the write routes, `POST /validate/candidates` and
   `POST /validate/versions`. Each takes exactly its write route's body, runs the same
@@ -296,6 +302,12 @@ This repo cannot ship until `sdkman-state` has the following, specced in
   call for a registration, one per row for a release. Validation never sees a release's
   default; when it names a version outside the release, the check confirms it exists through
   State's public read routes.
+- **A non-java version grammar.** `POST /versions` and its validation twin refuse a
+  non-java version that does not match `^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$`. Every non-java
+  version in the phase 1 snapshot matches it. Until State ships it, rule 9's version
+  syntax check is a no-op for every candidate this repo accepts.
+- **No mixed platform sets.** `POST /versions` and its validation twin refuse a
+  `UNIVERSAL` row for a version that has other platform rows, and the reverse.
 
 ## Tooling
 
@@ -328,9 +340,9 @@ elsewhere.
 | Workflow | Trigger | Job |
 |---|---|---|
 | `Pull Requests` | every PR | runs `contrib check` on a request PR, the Rust build and tests on any other; no secrets |
-| `Apply` | push to `main`, ignoring pushes that only touch `.applied/` | runs `contrib apply`, one run at a time, never cancelled; holds the State credential and the App token |
+| `Apply` | push to `main`, ignoring pushes that only touch `.applied/`; `workflow_dispatch`, with an optional `void` input | runs `contrib apply`, one run at a time, never cancelled; holds the State credential and the App token |
 | `Release` | a version tag | builds and publishes the `contrib` binaries |
-| `Workflow Failure Alert` | `workflow_run` of any workflow on `main` | `reusable-workflow-failure-alert.yml`: a failed apply (or release) notifies the maintainer through the shared failure alert |
+| `Workflow Failure Alert` | `workflow_run` of any workflow on `main` | `reusable-workflow-failure-alert.yml`: a failed apply notifies the maintainer through the shared failure alert; `Release` runs on tags, outside the alert's `main` scope, and shows its failure on its own run only |
 | `Triage: Issues, Comments, PRs` | issue, comment or PR opened | `reusable-triage-events.yml` |
 | `Check Report` | `workflow_run` of `Pull Requests` | posts the check's report artifact as the PR comment; holds write permission, never runs the PR's code |
 | `Triage: Fork PR` | `workflow_run` of `Pull Requests` | `reusable-triage-fork-pr.yml`: surfaces fork PRs and their check result |
@@ -465,6 +477,7 @@ Feature: Community contributions
 ## Out of Scope
 
 - java.
+- Candidates a vendor publishes through State's vendor role or the Vendor API.
 - Deleting or hiding versions, and deleting candidates.
 - Tags other than `stable`, and distributions.
 - Installing archives in CI (a smoke `sdk install`).
@@ -476,10 +489,12 @@ Feature: Community contributions
 
 - [ ] A PR adding one well-formed request passes the check, and the check's per-row report, with its checksums, is posted as a PR comment, fork PRs included
 - [ ] A file name not matching `<timestamp>-<kind>-<slug>.yaml`, a future timestamp, or one earlier than the candidate's latest applied request fails the check
+- [ ] A request whose check passed before a newer request for its candidate was applied cannot merge until its check passes again
 - [ ] `contrib new register` and `contrib new release` write correctly named skeletons that pass the check once their placeholders are filled
 - [ ] A PR adding more than one file, editing an existing request, or touching `.applied/` fails the check
 - [ ] Unknown fields, a path that doesn't match the `candidate`, and a file mixing `register` with `versions` or `default` each fail the check
 - [ ] java fails the check
+- [ ] A candidate not listed in `contrib-candidates.txt` fails the check
 - [ ] Each hard archive rule fails the check, and each convention only warns
 - [ ] Any declared `md5`, `sha256` or `sha512` that does not match the download fails the check, and fails the apply before anything for that request is written
 - [ ] Every row written to State carries a computed sha256, plus any declared `md5` or `sha512`
@@ -487,6 +502,7 @@ Feature: Community contributions
 - [ ] The check runs on fork PRs with no secrets
 - [ ] The apply runs one at a time, is never cancelled, applies pending requests in file-name order across all candidates, and stops at the first failure
 - [ ] A failed request is retried by the next run, and requests ordered after it wait
+- [ ] A maintainer can void a pending request, and the queue resumes
 - [ ] Rows are posted with no `tags` field, and the default moves `stable` through the tag route after every row is written, leaving every other tag untouched
 - [ ] Each applied request gets exactly one receipt under `.applied/`, at the request's mirrored path, committed by the GitHub App
 - [ ] Nothing in this repo deletes or hides anything in State
