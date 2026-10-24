@@ -124,7 +124,7 @@ so the reviewer has to judge any rewrite of one.
 ```yaml
 candidate: jpx
 versions:
-  - version: "1.2.0"
+  - version: 1.2.0
     platforms:
       LINUX_X64: https://downloads.jpx.dev/1.2.0/jpx-1.2.0-linux-x64.zip
       MAC_ARM64:
@@ -132,7 +132,7 @@ versions:
         sha256: 41ab...
         sha512: 7d0e...
       WINDOWS_X64: https://downloads.jpx.dev/1.2.0/jpx-1.2.0-windows-x64.zip
-default: "1.2.0"
+default: 1.2.0
 ```
 
 | Field | Required | Rule |
@@ -180,7 +180,7 @@ request writes.
 5. **Unknown fields are rejected.** Parsing is strict, so a typo fails the check and is
    never silently ignored. Every value is its scalar's exact text, so `version: 8.10` is
    `8.10`. A block-scalar description loses its trailing newline and is otherwise posted as
-   written. `contrib new` writes `version` and `default` quoted.
+   written.
 6. **`UNIVERSAL` excludes every other platform for one version.** A version is either one
    universal archive or a set of platform archives, never both.
 7. **Every archive is downloaded, and every checksum is verified against it.** A request may
