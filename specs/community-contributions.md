@@ -208,7 +208,7 @@ request writes.
     Moving the default to an existing version means re-posting that version. State enforces
     every tagging rule; this repo holds none of that logic and fails fast on whatever State
     refuses. A default with neither a `UNIVERSAL` nor a `LINUX_X64` row never becomes the
-    default, and is for the reviewing maintainer to catch. `stable` is the tag State's default cascade reads first
+    default, and is for the reviewing maintainer to catch. `stable` is the only tag State's default cascade reads for non-java candidates
     ([`default-tag-cascade.md`](../../../do/sdkman-state/specs/default-tag-cascade.md)).
 11. **Receipts are written only by the bot.** A contributor PR that touches `.applied/` fails
     the check. The bot may only add files under `.applied/`.
