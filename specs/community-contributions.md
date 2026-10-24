@@ -124,15 +124,15 @@ so the reviewer has to judge any rewrite of one.
 ```yaml
 candidate: jpx
 versions:
-  - version: 1.2.0
+  - version: "1.2.0"
     platforms:
-      LINUX_X64: https://github.com/jpx/jpx/releases/download/v1.2.0/jpx-1.2.0-linux-x64.zip
+      LINUX_X64: https://downloads.jpx.dev/1.2.0/jpx-1.2.0-linux-x64.zip
       MAC_ARM64:
-        url: https://github.com/jpx/jpx/releases/download/v1.2.0/jpx-1.2.0-mac-arm64.zip
+        url: https://downloads.jpx.dev/1.2.0/jpx-1.2.0-mac-arm64.zip
         sha256: 41ab...
         sha512: 7d0e...
-      WINDOWS_X64: https://github.com/jpx/jpx/releases/download/v1.2.0/jpx-1.2.0-windows-x64.zip
-default: 1.2.0
+      WINDOWS_X64: https://downloads.jpx.dev/1.2.0/jpx-1.2.0-windows-x64.zip
+default: "1.2.0"
 ```
 
 | Field | Required | Rule |
@@ -509,4 +509,4 @@ Feature: Community contributions
 - [ ] Nothing in this repo deletes or hides anything in State
 - [ ] `main` accepts changes only through maintainer-approved PRs, except the receipts `contrib apply` pushes with the App
 - [ ] The repo carries the standard SDKMAN workflows, and a failed apply on `main` notifies the maintainer through the shared failure alert
-- [ ] The README is a complete contributor guide: both request kinds, the two-PR flow, how a candidate gets onto `contrib-candidates.txt`, the archive rules including the URL rule, how to move the default by re-posting a version, and how to read the check's comment
+- [ ] The README is a complete contributor guide: both request kinds, the two-PR flow, how a candidate gets onto `contrib-candidates.txt`, the archive rules including the URL rule, how to move the default by re-posting a version, and how to read the check's comment, with a worked YAML example of a registration, a release, and a release that moves the default
