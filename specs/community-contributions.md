@@ -142,15 +142,16 @@ default: 1.2.0
 | `versions[].version` | yes | a version string State accepts for this candidate |
 | `versions[].platforms` | yes | a map from State platform id to an archive |
 | platform value | yes | either a URL, or `url` with any of `md5`, `sha256`, `sha512` (hex) |
-| `default` | no | a version in this request or already in State; becomes the `stable` tag |
+| `default` | no | a version in this request; its rows are posted tagged `stable` |
 
-A release needs `versions`, `default`, or both. With `default` alone, it moves the default to
-a version that already exists.
+A release needs `versions`; `default` is optional. A `default` that is not one of the
+request's versions fails the check. Moving the default to an existing version means
+re-posting that version.
 
 Platform ids are State's, verbatim: `LINUX_X32`, `LINUX_X64`, `LINUX_ARM32HF`,
 `LINUX_ARM32SF`, `LINUX_ARM64`, `MAC_X64`, `MAC_ARM64`, `WINDOWS_X64`, `UNIVERSAL`.
 
-There is no `distribution`, `visible` or `tags` field. Distributions and hidden versions only
+There is no `distribution`, `visible` or `tags` field; `default` is how a request sets a tag. Distributions and hidden versions only
 exist for java, which this repo never touches. The `stable` tag is the only tag a request
 controls.
 
@@ -202,13 +203,11 @@ request writes.
 9. **Every State rule is checked by State.** Version syntax, the candidate registry,
    and description rules are evaluated by State's validation twins, never re-implemented
    here. Rules live in one place and can't drift.
-10. **The default moves through the tag route, last.** Every row is posted with no `tags`
-    field, which leaves its existing tags untouched; posting `tags` would replace the row's
-    whole tag set. After every version in the request is written, the apply tags the default
-    `stable` with State's tag route (`POST /versions/tags`). State enforces every tagging
-    rule, including which rows carry `stable`; this repo holds none of that logic and fails
-    fast on whatever State refuses. This is the same whether the default is in the release or
-    already in State. `stable` is the tag State's default cascade reads first
+10. **The default is tagged by State.** The default must be a version in the request. Its
+    rows are posted with `tags: ["stable"]`; every other row is posted with no `tags`
+    field. Moving the default to an existing version means re-posting that version. State
+    enforces every tagging rule; this repo holds none of that logic and fails fast on
+    whatever State refuses. `stable` is the tag State's default cascade reads first
     ([`default-tag-cascade.md`](../../../do/sdkman-state/specs/default-tag-cascade.md)).
 11. **Receipts are written only by the bot.** A contributor PR that touches `.applied/` fails
     the check. The bot may only add files under `.applied/`.
@@ -229,9 +228,7 @@ The check validates only the request the PR adds. It:
 3. downloads every archive, applies rules 6 to 8, and computes each archive's sha256;
 4. posts each body the apply will post, computed sha256 included, to its State validation
    twin (one per row for a release) and collects every answer. Only `204` passes: any other
-   answer, a `400`, a `404` from a missing route, or a server error, fails the check. When
-   `default` names a version outside the release, confirms through State's public read routes
-   that it exists;
+   answer, a `400`, a `404` from a missing route, or a server error, fails the check;
 5. writes a report listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched, to the job summary and as a run artifact. A fork PR's token is read-only, so the check cannot comment itself; the `Check Report` workflow posts the report as one PR comment.
 
 ```
@@ -254,7 +251,7 @@ For each pending request, in file-name order:
   written. A declared checksum is the only thing that pins an archive to what was reviewed.
   An archive with none, swapped after review for one that is still well formed, is accepted
   and written with the sha256 of what was downloaded. It then posts each row with its
-  checksums and no `tags`. The default moves last, through the tag route (rule 10).
+  checksums, the default's rows tagged `stable` (rule 10).
 - **Then:** commits the receipt, runs `git pull --rebase` and pushes, before the next
   request.
 
@@ -294,17 +291,16 @@ This repo cannot ship until `sdkman-state` has the following, specced in
 [`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md):
 
 - **A `community` role** for every candidate, able to write candidates, versions and
-  tags. This repo uses only part of that: it never deletes, only moves `stable`, and never touches java. Those limits are this repo's
+  tags. This repo uses only part of that: it never deletes, only sets `stable`, and never touches java. Those limits are this repo's
   rules, enforced by the check and the apply, not by State.
 - **Public validation**: open twins of the write routes, `POST /validate/candidates` and
   `POST /validate/versions`. Each takes exactly its write route's body, runs the same
   validation, and answers as the write would (`204` on success), without writing or a login.
   The check posts exactly the bodies the apply will post: one
-  call for a registration, one per row for a release. Validation never sees a release's
-  default; when it names a version outside the release, the check confirms it exists through
-  State's public read routes.
-- **Tagging rules.** `POST /versions/tags` owns how `stable` moves, so that once a version
-  is tagged `stable`, the candidate's default is that version, whatever platforms it and the
+  call for a registration, one per row for a release, the default's rows with their
+  `stable` tag.
+- **Tagging rules.** `POST /versions` and its validation twin own how a posted `stable`
+  tag moves, so that once a version is posted tagged `stable`, the candidate's default is that version, whatever platforms it and the
   previous default have.
 - **A non-java version grammar.** `POST /versions` and its validation twin refuse a
   non-java version that does not match `^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$`. Every non-java
@@ -468,10 +464,14 @@ Feature: Community contributions
     Then every version is written once
       And the default's rows carry the stable tag
 
-  Scenario: The default moves without new versions
+  Scenario: The default moves to an existing version
     Given "tomcat 11.0.15" exists in State
-    When a release with only "default: 11.0.15" is applied
+    When a release re-posting "11.0.15" with "default: 11.0.15" is applied
     Then "tomcat"'s default is 11.0.15
+
+  Scenario: A default outside the request fails the check
+    When a contributor opens a release whose default is not one of its versions
+    Then the check fails
 
   Scenario: A contributor cannot write a receipt
     When a contributor opens a PR touching .applied/
@@ -507,7 +507,7 @@ Feature: Community contributions
 - [ ] The apply runs one at a time, is never cancelled, applies pending requests in file-name order across all candidates, and stops at the first failure
 - [ ] A failed request is retried by the next run, and requests ordered after it wait
 - [ ] A maintainer can void a pending request, and the queue resumes
-- [ ] Rows are posted with no `tags` field, and the default moves `stable` through the tag route after every row is written, leaving every other tag untouched
+- [ ] The default's rows are posted with `tags: ["stable"]`, every other row with no `tags` field, and a default outside the request fails the check
 - [ ] Each applied request gets exactly one receipt under `.applied/`, at the request's mirrored path, committed by the GitHub App
 - [ ] Nothing in this repo deletes or hides anything in State
 - [ ] `main` accepts changes only through maintainer-approved PRs, except the receipts `contrib apply` pushes with the App
