@@ -204,8 +204,8 @@ request writes.
    and description rules are evaluated by State's validation twins, never re-implemented
    here. Rules live in one place and can't drift.
 10. **The default is tagged by State.** The default must be a version in the request. Its
-    rows are posted with `tags: ["stable"]`; every other row is posted with no `tags`
-    field. Moving the default to an existing version means re-posting that version. State
+    rows are posted with `tags: ["stable"]`, its `UNIVERSAL` or `LINUX_X64` row first, as
+    State requires; every other row is posted with no `tags` field. Moving the default to an existing version means re-posting that version. State
     enforces every tagging rule; this repo holds none of that logic and fails fast on
     whatever State refuses. `stable` is the tag State's default cascade reads first
     ([`default-tag-cascade.md`](../../../do/sdkman-state/specs/default-tag-cascade.md)).
@@ -287,8 +287,9 @@ metadata it sent instead of `rows` and `tag`.
 ## What State must provide
 
 This repo cannot ship until `sdkman-state` has the following, specced in
-[`community-role.md`](../../../do/sdkman-state/specs/community-role.md) and
-[`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md):
+[`community-role.md`](../../../do/sdkman-state/specs/community-role.md),
+[`public-validation.md`](../../../do/sdkman-state/specs/public-validation.md) and
+[`non-java-version-rules.md`](../../../do/sdkman-state/specs/non-java-version-rules.md):
 
 - **A `community` role** for every candidate, able to write candidates, versions and
   tags. This repo uses only part of that: it never deletes, only sets `stable`, and never touches java. Those limits are this repo's
@@ -299,15 +300,10 @@ This repo cannot ship until `sdkman-state` has the following, specced in
   The check posts exactly the bodies the apply will post: one
   call for a registration, one per row for a release, the default's rows with their
   `stable` tag.
-- **Tagging rules.** `POST /versions` and its validation twin own how a posted `stable`
-  tag moves, so that once a version is posted tagged `stable`, the candidate's default is that version, whatever platforms it and the
-  previous default have.
-- **A non-java version grammar.** `POST /versions` and its validation twin refuse a
-  non-java version that does not match `^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$`. Every non-java
-  version in the phase 1 snapshot matches it. Until State ships it, rule 9's version
-  syntax check is a no-op for every candidate this repo accepts.
-- **No mixed platform sets.** `POST /versions` and its validation twin refuse a
-  `UNIVERSAL` row for a version that has other platform rows, and the reverse.
+- **Non-java version rules** on `POST /versions` and its validation twin: a version
+  grammar, one platform shape per version, and a `stable` tag that always agrees with the
+  candidate's default. Until State ships them, rule 9's version syntax check is a no-op for
+  every candidate this repo accepts.
 
 ## Tooling
 
