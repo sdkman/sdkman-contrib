@@ -204,10 +204,11 @@ request writes.
    and description rules are evaluated by State's validation twins, never re-implemented
    here. Rules live in one place and can't drift.
 10. **The default is tagged by State.** The default must be a version in the request. Its
-    rows are posted with `tags: ["stable"]`, its `UNIVERSAL` or `LINUX_X64` row first, as
-    State requires; every other row is posted with no `tags` field. Moving the default to an existing version means re-posting that version. State
-    enforces every tagging rule; this repo holds none of that logic and fails fast on
-    whatever State refuses. `stable` is the tag State's default cascade reads first
+    rows are posted with `tags: ["stable"]`; every other row is posted with no `tags` field.
+    Moving the default to an existing version means re-posting that version. State enforces
+    every tagging rule; this repo holds none of that logic and fails fast on whatever State
+    refuses. A default with neither a `UNIVERSAL` nor a `LINUX_X64` row never becomes the
+    default, and is for the reviewing maintainer to catch. `stable` is the tag State's default cascade reads first
     ([`default-tag-cascade.md`](../../../do/sdkman-state/specs/default-tag-cascade.md)).
 11. **Receipts are written only by the bot.** A contributor PR that touches `.applied/` fails
     the check. The bot may only add files under `.applied/`.
