@@ -204,9 +204,10 @@ request writes.
    here. Rules live in one place and can't drift.
 10. **The default moves through the tag route, last.** Every row is posted with no `tags`
     field, which leaves its existing tags untouched; posting `tags` would replace the row's
-    whole tag set. After every version in the request is written, the apply moves `stable`
-    onto each of the default's platform rows with State's tag route (`POST /versions/tags`),
-    which touches no other tag. This is the same whether the default is in the release or
+    whole tag set. After every version in the request is written, the apply tags the default
+    `stable` with State's tag route (`POST /versions/tags`). State enforces every tagging
+    rule, including which rows carry `stable`; this repo holds none of that logic and fails
+    fast on whatever State refuses. This is the same whether the default is in the release or
     already in State. `stable` is the tag State's default cascade reads first
     ([`default-tag-cascade.md`](../../../do/sdkman-state/specs/default-tag-cascade.md)).
 11. **Receipts are written only by the bot.** A contributor PR that touches `.applied/` fails
@@ -302,6 +303,9 @@ This repo cannot ship until `sdkman-state` has the following, specced in
   call for a registration, one per row for a release. Validation never sees a release's
   default; when it names a version outside the release, the check confirms it exists through
   State's public read routes.
+- **Tagging rules.** `POST /versions/tags` owns how `stable` moves, so that once a version
+  is tagged `stable`, the candidate's default is that version, whatever platforms it and the
+  previous default have.
 - **A non-java version grammar.** `POST /versions` and its validation twin refuse a
   non-java version that does not match `^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$`. Every non-java
   version in the phase 1 snapshot matches it. Until State ships it, rule 9's version
