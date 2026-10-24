@@ -356,7 +356,7 @@ check alerts nobody; the contributor reads the check's report comment instead.
 
 ## Rollout
 
-1. `sdkman-state` ships the `community` role and public validation.
+1. `sdkman-state` ships the `community` role, public validation and the non-java version rules.
 2. This repo ships the check, the apply, the bot and a contributor guide (the README), with
    `main` protected.
 3. Confirm in Cloudflare that no edge rate-limit rule on `state.sdkman.io` throttles the
@@ -509,4 +509,4 @@ Feature: Community contributions
 - [ ] Nothing in this repo deletes or hides anything in State
 - [ ] `main` accepts changes only through maintainer-approved PRs, except the receipts `contrib apply` pushes with the App
 - [ ] The repo carries the standard SDKMAN workflows, and a failed apply on `main` notifies the maintainer through the shared failure alert
-- [ ] The README is a complete contributor guide: both request kinds, the two-PR flow, the archive rules, and how to read the check's comment
+- [ ] The README is a complete contributor guide: both request kinds, the two-PR flow, how a candidate gets onto `contrib-candidates.txt`, the archive rules including the URL rule, how to move the default by re-posting a version, and how to read the check's comment
