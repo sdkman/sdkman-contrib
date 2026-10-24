@@ -194,7 +194,7 @@ request writes.
 
    | Fails | Warns |
    |---|---|
-   | the URL does not resolve to `200` over `https` | the base directory is not `<candidate>-<version>` |
+   | the URL does not name a file ending in `.zip` or `.tar.gz`, or does not answer `200` over `https` without a redirect | the base directory is not `<candidate>-<version>` |
    | the archive is not a zip or tar.gz | the file name does not follow the convention |
    | it does not hold exactly one base directory | |
    | there is no `bin/` directly under the base directory | |
