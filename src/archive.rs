@@ -31,7 +31,8 @@ pub fn check_url(url: &str, candidate: &str, version: &str) -> (Option<ArchiveFo
     if parsed.scheme() != "https" {
         verdict.failures.push("URL must use https".to_owned());
     }
-    if parsed.path().contains("/releases/latest/") {
+    let decoded_path = percent_encoding::percent_decode_str(parsed.path()).decode_utf8_lossy();
+    if decoded_path.contains("/releases/latest/") {
         verdict
             .failures
             .push("URL must name a fixed release, not /releases/latest/".to_owned());
@@ -267,6 +268,20 @@ mod tests {
     fn rejects_latest_release_download() {
         let (format, verdict) = check_url(
             "https://github.com/jpx/jpx/releases/latest/download/jpx-1.2.0.zip",
+            "jpx",
+            "1.2.0",
+        );
+        assert_eq!(format, Some(ArchiveFormat::Zip));
+        assert_eq!(
+            verdict.failures,
+            vec!["URL must name a fixed release, not /releases/latest/"]
+        );
+    }
+
+    #[test]
+    fn rejects_percent_encoded_latest_release_download() {
+        let (format, verdict) = check_url(
+            "https://github.com/jpx/jpx/releases/%6Catest/download/jpx-1.2.0.zip",
             "jpx",
             "1.2.0",
         );
