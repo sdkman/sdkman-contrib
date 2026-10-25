@@ -25,11 +25,20 @@ impl Git {
     }
 
     pub fn added_in(&self, path: &str) -> Result<String, GitError> {
+        self.adding_commit(path, "%h")
+    }
+
+    pub fn added_in_full(&self, path: &str) -> Result<String, GitError> {
+        self.adding_commit(path, "%H")
+    }
+
+    fn adding_commit(&self, path: &str, format: &str) -> Result<String, GitError> {
+        let format_argument = format!("--format={format}");
         let output = self.run(&[
             "log",
             "--first-parent",
             "--diff-filter=A",
-            "--format=%h",
+            &format_argument,
             "-n",
             "1",
             "--",
