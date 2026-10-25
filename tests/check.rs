@@ -1,7 +1,8 @@
 mod support;
 
 use chrono::{DateTime, Utc};
-use sdkman_contrib::check::{CheckContext, admit_timestamp, run_check};
+use sdkman_contrib::check::{CheckContext, admit_timestamp, check_request, run_check};
+use sdkman_contrib::check_digests::DigestRow;
 use sdkman_contrib::fetch::ArchiveSource;
 use sdkman_contrib::load::load_request;
 use sdkman_contrib::receipt::{Receipt, write_receipt};
@@ -191,14 +192,17 @@ impl Fixture {
         self
     }
 
-    fn check(&self, validator: &FakeValidator, path: &str) -> sdkman_contrib::report::Report {
-        let context = CheckContext {
+    fn context<'a>(&'a self, validator: &'a FakeValidator) -> CheckContext<'a> {
+        CheckContext {
             repo_root: self.repo.path(),
             now: now_at("20261010T000000Z"),
             validator,
             archives: &self.archives,
-        };
-        run_check(&context, path)
+        }
+    }
+
+    fn check(&self, validator: &FakeValidator, path: &str) -> sdkman_contrib::report::Report {
+        run_check(&self.context(validator), path)
     }
 }
 
@@ -529,4 +533,43 @@ fn redirected_archive_is_judged() {
             .starts_with("FAIL  jpx 1.2.0 LINUX_X64")
     );
     assert!(report.render_text().contains("no bin/ under jpx-1.2.0/"));
+}
+
+#[test]
+fn digests_carry_each_computed_sha256() {
+    let second_url = "https://downloads.jpx.dev/jpx-1.2.0-mac.zip";
+    let fixture = good_release().serving(second_url, "b.zip", &GOOD_ENTRIES);
+    let release = RELEASE.replace(
+        "      LINUX_X64: https://downloads.jpx.dev/jpx-1.2.0.zip\n",
+        &format!("      LINUX_X64: {ARCHIVE_URL}\n      MAC_ARM64: {second_url}\n"),
+    );
+    fixture.repo.write(RELEASE_PATH, &release);
+    let validator = FakeValidator::default();
+    let outcome = check_request(&fixture.context(&validator), RELEASE_PATH);
+    assert_eq!(outcome.digests.request, RELEASE_PATH);
+    assert_eq!(
+        outcome.digests.rows,
+        vec![
+            DigestRow {
+                version: "1.2.0".into(),
+                platform: "LINUX_X64".into(),
+                sha256: sha256_of(&fixture.dir.path().join("a.zip")),
+            },
+            DigestRow {
+                version: "1.2.0".into(),
+                platform: "MAC_ARM64".into(),
+                sha256: sha256_of(&fixture.dir.path().join("b.zip")),
+            },
+        ]
+    );
+}
+
+#[test]
+fn digests_omit_rows_that_were_not_downloaded() {
+    let fixture = Fixture::new();
+    fixture.repo.write(RELEASE_PATH, RELEASE);
+    let validator = FakeValidator::default();
+    let outcome = check_request(&fixture.context(&validator), RELEASE_PATH);
+    assert!(outcome.report.has_failures());
+    assert!(outcome.digests.rows.is_empty());
 }

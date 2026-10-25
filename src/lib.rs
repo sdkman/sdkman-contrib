@@ -2,6 +2,7 @@ pub mod apply;
 pub mod archive;
 pub mod change_set;
 pub mod check;
+pub mod check_digests;
 pub mod digest;
 pub mod fetch;
 pub mod git;

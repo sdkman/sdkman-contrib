@@ -2,6 +2,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 
+use crate::check_digests::{CheckDigests, DigestRow};
 use crate::fetch::ArchiveSource;
 use crate::load::load_request;
 use crate::receipt::latest_applied;
@@ -29,22 +30,45 @@ pub fn admit_timestamp(
     check_timestamp(&path.timestamp(), now, latest.as_ref())
 }
 
+pub struct CheckOutcome {
+    pub report: Report,
+    pub digests: CheckDigests,
+}
+
 pub fn run_check(context: &CheckContext, repo_path: &str) -> Report {
+    check_request(context, repo_path).report
+}
+
+pub fn check_request(context: &CheckContext, repo_path: &str) -> CheckOutcome {
     let mut report = Report::default();
-    let (path, request) = match load_request(context.repo_root, repo_path) {
-        Ok(loaded) => loaded,
-        Err(messages) => return failed(repo_path, messages),
-    };
-    if let Err(message) = admit_timestamp(context.repo_root, &path, context.now) {
-        return failed(repo_path, vec![message]);
+    let mut rows = Vec::new();
+    match check_loaded(context, repo_path, &mut report) {
+        Ok(checked) => rows = checked,
+        Err(messages) => report = failed(repo_path, messages),
     }
-    match &request {
+    CheckOutcome {
+        report,
+        digests: CheckDigests {
+            request: repo_path.to_owned(),
+            rows,
+        },
+    }
+}
+
+fn check_loaded(
+    context: &CheckContext,
+    repo_path: &str,
+    report: &mut Report,
+) -> Result<Vec<DigestRow>, Vec<String>> {
+    let (path, request) = load_request(context.repo_root, repo_path)?;
+    admit_timestamp(context.repo_root, &path, context.now).map_err(|message| vec![message])?;
+    Ok(match &request {
         Request::Registration(registration) => {
             report.push(check_registration(context, registration));
+            Vec::new()
         }
-        Request::Release(release) => check_release(context, release, &mut report),
-    }
-    report
+        Request::Release(release) => check_release(context, release, report),
+    })
 }
 
 fn failed(subject: &str, messages: Vec<String>) -> Report {
@@ -75,8 +99,10 @@ fn check_registration(context: &CheckContext, registration: &Registration) -> Re
     }
 }
 
-fn check_release(context: &CheckContext, release: &Release, report: &mut Report) {
+fn check_release(context: &CheckContext, release: &Release, report: &mut Report) -> Vec<DigestRow> {
+    let mut digests = Vec::new();
     for row in verify_release(release, context.archives) {
+        digests.extend(DigestRow::from_check(&row));
         let failures = match version_body(release, &row) {
             Some(body) => state_failures(context.validator.validate_version(&body)),
             None => Vec::new(),
@@ -86,6 +112,7 @@ fn check_release(context: &CheckContext, release: &Release, report: &mut Report)
     if let Some(line) = unmovable_default_warning(release) {
         report.push(line);
     }
+    digests
 }
 
 fn unmovable_default_warning(release: &Release) -> Option<ReportLine> {
