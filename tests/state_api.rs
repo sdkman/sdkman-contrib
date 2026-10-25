@@ -337,3 +337,95 @@ fn unreachable_read_is_a_transport_error() {
         Err(WriteError::Transport(_))
     ));
 }
+
+#[test]
+fn tag_stable_posts_the_tag() {
+    let state = FakeState::answering(&[TOKEN_ONE, (204, "")]);
+    community(&state.url)
+        .tag_stable("contrib", "0.2.0", "LINUX_X64")
+        .unwrap();
+    let requests = state.requests();
+    assert_eq!(requests[1].method, "POST");
+    assert_eq!(requests[1].path, "/versions/tags");
+    assert_eq!(requests[1].authorization.as_deref(), Some("Bearer t1"));
+    let posted: Value = serde_json::from_str(&requests[1].body).unwrap();
+    assert_eq!(
+        posted,
+        json!({"candidate": "contrib", "version": "0.2.0", "platform": "LINUX_X64", "tag": "stable"})
+    );
+}
+
+#[test]
+fn untag_stable_deletes_the_tag() {
+    let state = FakeState::answering(&[TOKEN_ONE, (204, ""), (404, "")]);
+    let writer = community(&state.url);
+    writer.untag_stable("contrib", "MAC_X64").unwrap();
+    writer.untag_stable("contrib", "MAC_X64").unwrap();
+    let requests = state.requests();
+    assert_eq!(requests[1].method, "DELETE");
+    assert_eq!(requests[1].path, "/versions/tags");
+    assert_eq!(requests[1].authorization.as_deref(), Some("Bearer t1"));
+    let sent: Value = serde_json::from_str(&requests[1].body).unwrap();
+    assert_eq!(
+        sent,
+        json!({"candidate": "contrib", "platform": "MAC_X64", "tag": "stable"})
+    );
+}
+
+#[test]
+fn delete_version_sends_a_null_distribution() {
+    let state = FakeState::answering(&[TOKEN_ONE, (204, ""), (404, "")]);
+    let writer = community(&state.url);
+    writer
+        .delete_version("contrib", "0.2.0", "MAC_ARM64")
+        .unwrap();
+    writer
+        .delete_version("contrib", "0.2.0", "MAC_ARM64")
+        .unwrap();
+    let requests = state.requests();
+    assert_eq!(requests[1].method, "DELETE");
+    assert_eq!(requests[1].path, "/versions");
+    let sent: Value = serde_json::from_str(&requests[1].body).unwrap();
+    assert_eq!(
+        sent,
+        json!({
+            "candidate": "contrib",
+            "version": "0.2.0",
+            "platform": "MAC_ARM64",
+            "distribution": null
+        })
+    );
+}
+
+#[test]
+fn tagged_row_delete_is_refused() {
+    let state = FakeState::answering(&[
+        TOKEN_ONE,
+        (409, r#"{"error":"Conflict","message":"version is tagged"}"#),
+    ]);
+    let error = community(&state.url)
+        .delete_version("contrib", "0.2.0", "LINUX_X64")
+        .unwrap_err();
+    assert_eq!(
+        error,
+        WriteError::Refused {
+            status: 409,
+            messages: vec!["version is tagged".to_owned()]
+        }
+    );
+}
+
+#[test]
+fn delete_relogs_in_after_401() {
+    let state = FakeState::answering(&[TOKEN_ONE, (401, ""), TOKEN_TWO, (204, "")]);
+    community(&state.url)
+        .untag_stable("contrib", "LINUX_X64")
+        .unwrap();
+    let requests = state.requests();
+    assert_eq!(
+        state.paths(),
+        vec!["/login", "/versions/tags", "/login", "/versions/tags"]
+    );
+    assert_eq!(requests[3].method, "DELETE");
+    assert_eq!(requests[3].authorization.as_deref(), Some("Bearer t2"));
+}

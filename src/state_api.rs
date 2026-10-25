@@ -69,6 +69,14 @@ pub trait VendorState: StateWriter {
         version: &str,
         platform: &str,
     ) -> Result<bool, WriteError>;
+    fn tag_stable(&self, candidate: &str, version: &str, platform: &str) -> Result<(), WriteError>;
+    fn untag_stable(&self, candidate: &str, platform: &str) -> Result<(), WriteError>;
+    fn delete_version(
+        &self,
+        candidate: &str,
+        version: &str,
+        platform: &str,
+    ) -> Result<(), WriteError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +107,12 @@ impl std::error::Error for WriteError {}
 pub struct Credentials {
     pub email: String,
     pub password: String,
+}
+
+#[derive(Clone, Copy)]
+enum Verb {
+    Post,
+    Delete,
 }
 
 pub struct HttpState {
@@ -168,10 +182,20 @@ impl HttpState {
     }
 
     fn write(&self, path: &str, body: &impl Serialize, accepted: &[u16]) -> Result<(), WriteError> {
-        let mut answer = self.post_authorised(path, body)?;
+        self.write_with(Verb::Post, path, body, accepted)
+    }
+
+    fn write_with(
+        &self,
+        verb: Verb,
+        path: &str,
+        body: &impl Serialize,
+        accepted: &[u16],
+    ) -> Result<(), WriteError> {
+        let mut answer = self.send_authorised(verb, path, body)?;
         if answer.status == 401 {
             self.obtain_token().map_err(WriteError::Login)?;
-            answer = self.post_authorised(path, body)?;
+            answer = self.send_authorised(verb, path, body)?;
         }
         if accepted.contains(&answer.status) {
             Ok(())
@@ -183,9 +207,14 @@ impl HttpState {
         }
     }
 
-    fn post_authorised(&self, path: &str, body: &impl Serialize) -> Result<Answer, WriteError> {
+    fn send_authorised(
+        &self,
+        verb: Verb,
+        path: &str,
+        body: &impl Serialize,
+    ) -> Result<Answer, WriteError> {
         let token = self.held_or_new_token().map_err(WriteError::Login)?;
-        self.post(path, body, Some(&token))
+        self.send(verb, path, body, Some(&token))
             .map_err(WriteError::Transport)
     }
 
@@ -195,14 +224,34 @@ impl HttpState {
         body: &impl Serialize,
         token: Option<&str>,
     ) -> Result<Answer, String> {
+        self.send(Verb::Post, path, body, token)
+    }
+
+    fn send(
+        &self,
+        verb: Verb,
+        path: &str,
+        body: &impl Serialize,
+        token: Option<&str>,
+    ) -> Result<Answer, String> {
         let url = format!("{}{path}", self.base_url);
-        let mut request = self.agent.post(&url);
-        if let Some(token) = token {
-            request = request.header("Authorization", format!("Bearer {token}"));
+        let mut response = match verb {
+            Verb::Post => {
+                let mut request = self.agent.post(&url);
+                if let Some(token) = token {
+                    request = request.header("Authorization", format!("Bearer {token}"));
+                }
+                request.send_json(body)
+            }
+            Verb::Delete => {
+                let mut request = self.agent.delete(&url).force_send_body();
+                if let Some(token) = token {
+                    request = request.header("Authorization", format!("Bearer {token}"));
+                }
+                request.send_json(body)
+            }
         }
-        let mut response = request
-            .send_json(body)
-            .map_err(|e| format!("{url} could not be reached: {e}"))?;
+        .map_err(|e| format!("{url} could not be reached: {e}"))?;
         let status = response.status().as_u16();
         let text = response
             .body_mut()
@@ -312,5 +361,49 @@ impl VendorState for HttpState {
             404 => Ok(false),
             _ => Err(refused(&answer)),
         }
+    }
+    fn tag_stable(&self, candidate: &str, version: &str, platform: &str) -> Result<(), WriteError> {
+        self.write(
+            "/versions/tags",
+            &serde_json::json!({
+                "candidate": candidate,
+                "version": version,
+                "platform": platform,
+                "tag": "stable",
+            }),
+            &[204],
+        )
+    }
+
+    fn untag_stable(&self, candidate: &str, platform: &str) -> Result<(), WriteError> {
+        self.write_with(
+            Verb::Delete,
+            "/versions/tags",
+            &serde_json::json!({
+                "candidate": candidate,
+                "platform": platform,
+                "tag": "stable",
+            }),
+            &[204, 404],
+        )
+    }
+
+    fn delete_version(
+        &self,
+        candidate: &str,
+        version: &str,
+        platform: &str,
+    ) -> Result<(), WriteError> {
+        self.write_with(
+            Verb::Delete,
+            "/versions",
+            &serde_json::json!({
+                "candidate": candidate,
+                "version": version,
+                "platform": platform,
+                "distribution": null,
+            }),
+            &[204, 404],
+        )
     }
 }
