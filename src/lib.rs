@@ -10,6 +10,7 @@ pub mod github;
 pub mod http;
 pub mod listing;
 pub mod load;
+pub mod publish;
 pub mod receipt;
 pub mod report;
 pub mod request;
