@@ -10,7 +10,13 @@ pub fn load_request(
     repo_path: &str,
 ) -> Result<(RequestPath, Request), Vec<String>> {
     let path = RequestPath::parse(repo_path).map_err(|error| vec![error.to_string()])?;
-    let text = fs::read_to_string(repo_root.join(repo_path))
+    let file = repo_root.join(repo_path);
+    if fs::symlink_metadata(&file).is_ok_and(|metadata| metadata.is_symlink()) {
+        return Err(vec![format!(
+            "{repo_path} is a symbolic link, not a request file"
+        )]);
+    }
+    let text = fs::read_to_string(&file)
         .map_err(|error| vec![format!("cannot read {repo_path}: {error}")])?;
     let request = parse_request(&text).map_err(|error| vec![error.to_string()])?;
     let mismatches = request.mismatches(&path);

@@ -73,6 +73,22 @@ fn missing_file_fails() {
     assert!(errors[0].contains("cannot read"));
 }
 
+#[cfg(unix)]
+#[test]
+fn symlinked_request_fails_unread() {
+    let repo = repo_listing("jpx\n");
+    let outside = TempDir::new().unwrap();
+    let target = outside.path().join("secret.yaml");
+    std::fs::write(&target, "top-secret-token: hunter2\n").unwrap();
+    let link = repo.path().join(REGISTRATION_PATH);
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let errors = load_request(repo.path(), REGISTRATION_PATH).unwrap_err();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("is a symbolic link"));
+    assert!(!errors[0].contains("hunter2"));
+}
+
 #[test]
 fn unknown_field_fails() {
     let repo = repo_listing("jpx\n");
