@@ -4,15 +4,17 @@ use std::{env, fs};
 
 use chrono::Utc;
 use clap::{Args, Parser, Subcommand};
+use sdkman_contrib::apply::{RunInfo, apply_queue, void_request};
 use sdkman_contrib::change_set::added_request;
 use sdkman_contrib::check::{CheckContext, run_check};
 use sdkman_contrib::fetch::HttpArchiveSource;
+use sdkman_contrib::git::Git;
 use sdkman_contrib::report::{Report, ReportLine, Status};
 use sdkman_contrib::request_path::Kind;
 use sdkman_contrib::skeleton::{
     registration_skeleton, release_skeleton, skeleton_path, write_skeleton,
 };
-use sdkman_contrib::state_api::{HttpState, resolve_state_url};
+use sdkman_contrib::state_api::{Credentials, HttpState, resolve_state_url};
 
 #[derive(Parser)]
 #[command(name = "contrib", version, about)]
@@ -25,6 +27,8 @@ struct Cli {
 enum Command {
     /// Check one request against the contribution rules and State's validation
     Check(CheckArgs),
+    /// Apply every pending request to State and push the receipts
+    Apply(ApplyArgs),
     /// Write a request skeleton stamped with the current UTC time
     #[command(subcommand)]
     New(NewCommand),
@@ -59,9 +63,21 @@ struct CheckArgs {
     report: Option<PathBuf>,
 }
 
+#[derive(Args)]
+struct ApplyArgs {
+    /// Void this pending request before applying the queue
+    #[arg(long, requires = "reason")]
+    void: Option<String>,
+
+    /// Why the request is voided
+    #[arg(long, requires = "void")]
+    reason: Option<String>,
+}
+
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Check(args) => check(args),
+        Command::Apply(args) => apply(args),
         Command::New(command) => new(command),
     }
 }
@@ -142,6 +158,55 @@ fn check(args: CheckArgs) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+fn apply(args: ApplyArgs) -> ExitCode {
+    let credentials = match (
+        non_empty_env("COMMUNITY_EMAIL"),
+        non_empty_env("COMMUNITY_PASSWORD"),
+    ) {
+        (Some(email), Some(password)) => Credentials { email, password },
+        _ => {
+            eprintln!("missing COMMUNITY_EMAIL or COMMUNITY_PASSWORD");
+            return ExitCode::from(2);
+        }
+    };
+    let state_url = resolve_state_url(env::var("CONTRIB_STATE_URL").ok());
+    eprintln!("applying to {state_url}");
+
+    let state = HttpState::with_credentials(&state_url, credentials);
+    if let Err(message) = state.login() {
+        eprintln!("{message}");
+        return ExitCode::FAILURE;
+    }
+
+    let repo_root = env::current_dir().expect("current directory");
+    let git = Git::new(&repo_root);
+    let run = RunInfo::from_env(Utc::now());
+    if let (Some(path), Some(reason)) = (&args.void, &args.reason)
+        && let Err(error) = void_request(&repo_root, &git, &run, &normalise_path(path), reason)
+    {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
+
+    let archives = HttpArchiveSource::new();
+    match apply_queue(&repo_root, &state, &archives, &git, &run) {
+        Ok(applied) => {
+            for path in applied {
+                println!("applied {path}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
 }
 
 fn normalise_path(file: &str) -> String {
