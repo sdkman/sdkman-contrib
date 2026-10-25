@@ -34,6 +34,12 @@ they push. The README also names the GitHub release binaries as a fallback for a
 cannot use SDKMAN. A hand-written file stays valid, but the README no longer presents
 installing as an optional extra.
 
+*Side note for the README: a contributor who already has a Rust toolchain can build from
+source with `cargo install --git https://github.com/sdkman/sdkman-contrib`. The README
+mentions this in passing, never as a recommended path. `contrib` is not published to
+crates.io: it would ask contributors for a Rust toolchain and a compile, and add a release
+channel to maintain.*
+
 **A published release exists before the process is announced.** At least one tagged release
 is installable with `sdk install contrib` on each platform above, and carries a binary for
 each on GitHub too. Contributors can reach the releases and the README without being members
@@ -94,6 +100,7 @@ placeholder that has to be filled in elsewhere.
 - Following redirects to anything other than an `https` archive.
 - Changing what State stores for a URL.
 - Updating `contrib` automatically on a contributor's machine.
+- Publishing `contrib` to crates.io.
 - Any change to how the apply orders, retries or voids requests.
 
 ## Acceptance Criteria
@@ -105,6 +112,7 @@ placeholder that has to be filled in elsewhere.
 - [ ] A release that fails to publish any platform leaves the previous default in place and shows as failed
 - [ ] Each release also carries a working binary per platform on GitHub
 - [ ] The README presents `sdk install contrib` as the recommended install path, names the GitHub binaries as the fallback, and shows how to confirm the install worked
+- [ ] The README mentions `cargo install --git` as a side note for contributors who already have Rust
 - [ ] The README and the releases can be read by someone outside the `sdkman` organisation
 - [ ] A request whose archive URL is a GitHub release download passes the URL rule, and the archive rules judge the downloaded file
 - [ ] A redirect chain with a non-`https` hop, no final `200`, or no end fails the check
