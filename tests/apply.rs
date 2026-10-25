@@ -13,8 +13,7 @@ use sdkman_contrib::receipt::{Receipt, ReceiptRow, StableTag};
 use sdkman_contrib::request::{Archive, Registration, Release, ReleaseVersion, Request};
 use sdkman_contrib::request_path::RequestPath;
 use sdkman_contrib::state_api::WriteError;
-use sha2::{Digest, Sha256};
-use support::archives::tar_gz;
+use support::archives::{sha256_of, tar_gz};
 use support::fakes::{FakeArchives, FakeDigests, FakeHops, FakeWriter};
 use support::fixtures::GOOD_ENTRIES;
 use support::repo::TempRepo;
@@ -77,10 +76,6 @@ fn release(versions: Vec<(&str, Archive)>, default: Option<&str>) -> Request {
             .collect(),
         default: default.map(str::to_owned),
     })
-}
-
-fn sha256_of(path: &Path) -> String {
-    hex::encode(Sha256::digest(std::fs::read(path).unwrap()))
 }
 
 fn run() -> RunInfo {
