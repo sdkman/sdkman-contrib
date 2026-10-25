@@ -32,6 +32,9 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          if [ ! -f report.md ]; then
+            exit 0
+          fi
           pr_number=$(tr -d '[:space:]' < pr-number)
           case "$pr_number" in
             ''|*[!0-9]*) exit 0 ;;
