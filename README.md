@@ -240,4 +240,4 @@ A maintainer can run the `Apply` workflow by hand to retry the queue. Its option
 
 ## Developing `contrib`
 
-`contrib` is a Rust crate. The design is in [`specs/community-contributions.md`](specs/community-contributions.md). The verification gate is in [`CLAUDE.md`](CLAUDE.md).
+`contrib` is a Rust crate. The design is in [`specs/001-community-contributions.md`](specs/001-community-contributions.md). The verification gate is in [`CLAUDE.md`](CLAUDE.md).

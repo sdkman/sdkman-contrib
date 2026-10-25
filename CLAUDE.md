@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`sdkman-contrib` is a Rust crate with one binary, `contrib`. It checks and applies community contributions of candidates and versions, written as YAML requests under `requests/`, to the State API. The design is in [`specs/community-contributions.md`](specs/community-contributions.md). Read it before changing behaviour.
+`sdkman-contrib` is a Rust crate with one binary, `contrib`. It checks and applies community contributions of candidates and versions, written as YAML requests under `requests/`, to the State API. The design is in [`specs/001-community-contributions.md`](specs/001-community-contributions.md). Read it before changing behaviour.
 
 ## Layout
 

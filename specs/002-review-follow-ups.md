@@ -8,7 +8,7 @@ tells a new contributor how to install `contrib`, so the local check, the fastes
 contributor can get, is out of reach for most of them.
 
 This spec states what must change. It amends
-[`community-contributions.md`](community-contributions.md); where the two disagree, this one
+[`001-community-contributions.md`](001-community-contributions.md); where the two disagree, this one
 wins.
 
 *Reference: review of `main` at `9dd792b` on 2026-10-25.*
