@@ -6,4 +6,5 @@ pub mod fake_github;
 pub mod fake_state;
 pub mod fakes;
 pub mod fixtures;
+pub mod loopback;
 pub mod repo;
