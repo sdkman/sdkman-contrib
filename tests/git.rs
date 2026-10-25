@@ -38,6 +38,25 @@ fn added_in_names_the_merge_commit() {
 }
 
 #[test]
+fn added_in_full_names_the_whole_sha() {
+    let repo = TempRepo::new();
+    repo.write("README.md", "hello\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.write("requests/jpx/a.yaml", "a\n");
+    repo.commit_all("add request");
+    repo.git(&["checkout", "main"]);
+    repo.git(&["merge", "--no-ff", "feature", "-m", "merge feature"]);
+    let merge = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+
+    let commit = Git::new(repo.path())
+        .added_in_full("requests/jpx/a.yaml")
+        .expect("added in full");
+
+    assert_eq!(commit, merge);
+}
+
+#[test]
 fn added_in_fails_for_an_unknown_path() {
     let repo = TempRepo::new();
     repo.write("other.txt", "x\n");
