@@ -68,7 +68,7 @@ struct CheckArgs {
     #[arg(long)]
     report: Option<PathBuf>,
 
-    /// Write the computed sha256 of every checked row to this path as JSON
+    /// Write the computed sha256 of every downloaded row to this path as JSON
     #[arg(long)]
     digests: Option<PathBuf>,
 }
@@ -90,7 +90,7 @@ struct PublishArgs {
     #[arg(long)]
     url_base: String,
 
-    /// The directory holding the five `contrib-<version>-<platform>` archives
+    /// The directory holding the five `contrib-<version>-<suffix>` archives
     directory: PathBuf,
 }
 

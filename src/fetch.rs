@@ -34,7 +34,7 @@ pub enum FetchError {
 impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::TooManyRedirects => write!(f, "followed more than {MAX_REDIRECTS} redirects"),
+            Self::TooManyRedirects => write!(f, "redirected more than {MAX_REDIRECTS} times"),
             Self::InsecureRedirect => write!(f, "redirected to a URL that is not https"),
             Self::BadRedirect => write!(f, "redirected without a usable Location"),
             Self::Status(status) => write!(f, "answered {status}, expected 200"),

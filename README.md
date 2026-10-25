@@ -19,7 +19,7 @@ $ contrib --version
 contrib <version>
 ```
 
-It prints the installed version. If you cannot use SDKMAN, download the binary for your platform from the GitHub release. If you already have a Rust toolchain, `cargo install --git https://github.com/sdkman/sdkman-contrib` builds it from source.
+It prints the installed version. If you cannot use SDKMAN, download your platform's archive from the GitHub release. If you already have a Rust toolchain, `cargo install --git https://github.com/sdkman/sdkman-contrib` builds it from source.
 
 With `contrib` installed you can write a request with `contrib new` and run `contrib check` before you push.
 
