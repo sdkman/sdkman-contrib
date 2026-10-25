@@ -1,0 +1,4 @@
+# Candidates open to community requests.
+# Format: one candidate per line, exactly as State names it. Blank lines and lines starting with # are ignored.
+# Only candidates whose vendor publishes through neither State's vendor role nor the Vendor API may be listed.
+# A maintainer lists a candidate here before its registration PR. java is never listed: DISCO owns it.
