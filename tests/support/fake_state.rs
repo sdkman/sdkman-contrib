@@ -9,6 +9,7 @@ pub struct Recorded {
     pub method: String,
     pub path: String,
     pub body: String,
+    pub authorization: Option<String>,
 }
 
 /// Answers a scripted queue of `(status, body)` pairs in order, and `500` once it runs dry.
@@ -35,10 +36,16 @@ impl FakeState {
                 for mut request in server.incoming_requests() {
                     let mut body = String::new();
                     request.as_reader().read_to_string(&mut body).unwrap();
+                    let authorization = request
+                        .headers()
+                        .iter()
+                        .find(|header| header.field.equiv("Authorization"))
+                        .map(|header| header.value.to_string());
                     requests.lock().unwrap().push(Recorded {
                         method: request.method().to_string(),
                         path: request.url().to_owned(),
                         body,
+                        authorization,
                     });
                     let (status, text) = queue.pop_front().unwrap_or((500, String::new()));
                     let json = Header::from_bytes("Content-Type", "application/json").unwrap();

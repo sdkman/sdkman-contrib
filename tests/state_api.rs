@@ -1,7 +1,8 @@
 mod support;
 
 use sdkman_contrib::state_api::{
-    Answer, DEFAULT_STATE_URL, HttpState, StateValidator, resolve_state_url,
+    Answer, Credentials, DEFAULT_STATE_URL, HttpState, StateValidator, StateWriter, WriteError,
+    resolve_state_url,
 };
 use sdkman_contrib::state_body::{CandidateBody, VersionBody};
 use serde_json::{Value, json};
@@ -114,4 +115,131 @@ fn empty_state_url_falls_back() {
         resolve_state_url(Some("http://127.0.0.1:1".to_owned())),
         "http://127.0.0.1:1"
     );
+}
+
+const TOKEN_ONE: (u16, &str) = (200, r#"{"token":"t1"}"#);
+const TOKEN_TWO: (u16, &str) = (200, r#"{"token":"t2"}"#);
+
+fn community(url: &str) -> HttpState {
+    HttpState::with_credentials(
+        url,
+        Credentials {
+            email: "community@sdkman.io".to_owned(),
+            password: "secret".to_owned(),
+        },
+    )
+}
+
+fn paths(state: &FakeState) -> Vec<String> {
+    state.requests().into_iter().map(|r| r.path).collect()
+}
+
+#[test]
+fn login_posts_credentials() {
+    let state = FakeState::answering(&[TOKEN_ONE]);
+    community(&state.url).login().unwrap();
+    let requests = state.requests();
+    assert_eq!(requests[0].method, "POST");
+    assert_eq!(requests[0].path, "/login");
+    let posted: Value = serde_json::from_str(&requests[0].body).unwrap();
+    assert_eq!(
+        posted,
+        json!({"email": "community@sdkman.io", "password": "secret"})
+    );
+}
+
+#[test]
+fn login_failure_is_an_error() {
+    let state = FakeState::answering(&[(401, "")]);
+    let error = community(&state.url).login().unwrap_err();
+    assert_eq!(error, "login failed: State answered 401");
+}
+
+#[test]
+fn login_without_token_is_an_error() {
+    let state = FakeState::answering(&[(200, "{}")]);
+    assert!(community(&state.url).login().is_err());
+}
+
+#[test]
+fn write_without_credentials_never_reaches_state() {
+    let state = FakeState::answering(&[]);
+    let error = HttpState::new(&state.url)
+        .post_version(&version_body())
+        .unwrap_err();
+    assert!(matches!(error, WriteError::Login(_)));
+    assert!(state.requests().is_empty());
+}
+
+#[test]
+fn version_write_logs_in_first_and_sends_bearer() {
+    let state = FakeState::answering(&[TOKEN_ONE, (204, "")]);
+    community(&state.url).post_version(&version_body()).unwrap();
+    let requests = state.requests();
+    assert_eq!(paths(&state), vec!["/login", "/versions"]);
+    assert_eq!(requests[1].authorization.as_deref(), Some("Bearer t1"));
+    let posted: Value = serde_json::from_str(&requests[1].body).unwrap();
+    assert_eq!(posted, serde_json::to_value(version_body()).unwrap());
+}
+
+#[test]
+fn candidate_write_accepts_200_and_201_on_one_login() {
+    let state = FakeState::answering(&[TOKEN_ONE, (201, ""), (200, "")]);
+    let writer = community(&state.url);
+    writer.post_candidate(&candidate_body()).unwrap();
+    writer.post_candidate(&candidate_body()).unwrap();
+    assert_eq!(
+        paths(&state),
+        vec!["/login", "/admin/candidates", "/admin/candidates"]
+    );
+}
+
+#[test]
+fn version_write_refuses_anything_but_204() {
+    let state = FakeState::answering(&[TOKEN_ONE, (200, "")]);
+    let error = community(&state.url)
+        .post_version(&version_body())
+        .unwrap_err();
+    assert_eq!(
+        error,
+        WriteError::Refused {
+            status: 200,
+            messages: vec!["State answered 200".to_owned()]
+        }
+    );
+}
+
+#[test]
+fn refusal_carries_failure_messages() {
+    let body = r#"{"error":"Validation Error","failures":[{"field":"url","message":"bad"}]}"#;
+    let state = FakeState::answering(&[TOKEN_ONE, (400, body)]);
+    let error = community(&state.url)
+        .post_version(&version_body())
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "State refused the write with 400: url: bad"
+    );
+}
+
+#[test]
+fn relogs_in_once_after_401() {
+    let state = FakeState::answering(&[TOKEN_ONE, (401, ""), TOKEN_TWO, (204, "")]);
+    community(&state.url).post_version(&version_body()).unwrap();
+    let requests = state.requests();
+    assert_eq!(
+        paths(&state),
+        vec!["/login", "/versions", "/login", "/versions"]
+    );
+    assert_eq!(requests[3].authorization.as_deref(), Some("Bearer t2"));
+}
+
+#[test]
+fn second_401_is_refused_without_a_third_login() {
+    let state = FakeState::answering(&[TOKEN_ONE, (401, ""), TOKEN_TWO, (401, "")]);
+    let error = community(&state.url)
+        .post_version(&version_body())
+        .unwrap_err();
+    assert!(matches!(error, WriteError::Refused { status: 401, .. }));
+    assert_eq!(state.requests().len(), 4);
 }

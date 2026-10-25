@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::fmt;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -51,9 +53,46 @@ pub trait StateValidator {
     fn validate_candidate(&self, body: &CandidateBody) -> Result<Answer, String>;
 }
 
+pub trait StateWriter {
+    fn post_candidate(&self, body: &CandidateBody) -> Result<(), WriteError>;
+    fn post_version(&self, body: &VersionBody) -> Result<(), WriteError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteError {
+    Login(String),
+    Transport(String),
+    Refused { status: u16, messages: Vec<String> },
+}
+
+impl fmt::Display for WriteError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Login(message) | Self::Transport(message) => f.write_str(message),
+            Self::Refused { status, messages } => {
+                write!(
+                    f,
+                    "State refused the write with {status}: {}",
+                    messages.join("; ")
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for WriteError {}
+
+#[derive(Clone)]
+pub struct Credentials {
+    pub email: String,
+    pub password: String,
+}
+
 pub struct HttpState {
     base_url: String,
     agent: ureq::Agent,
+    credentials: Option<Credentials>,
+    token: RefCell<Option<String>>,
 }
 
 impl HttpState {
@@ -67,14 +106,90 @@ impl HttpState {
         Self {
             base_url: base_url.trim_end_matches('/').to_owned(),
             agent,
+            credentials: None,
+            token: RefCell::new(None),
         }
     }
 
-    fn post(&self, path: &str, body: &impl Serialize) -> Result<Answer, String> {
+    pub fn with_credentials(base_url: &str, credentials: Credentials) -> Self {
+        Self {
+            credentials: Some(credentials),
+            ..Self::new(base_url)
+        }
+    }
+
+    pub fn login(&self) -> Result<(), String> {
+        self.obtain_token().map(|_| ())
+    }
+
+    fn obtain_token(&self) -> Result<String, String> {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or_else(|| "no State credentials were given".to_owned())?;
+        let answer = self.post(
+            "/login",
+            &serde_json::json!({
+                "email": credentials.email,
+                "password": credentials.password,
+            }),
+            None,
+        )?;
+        if answer.status != 200 {
+            return Err(format!("login failed: State answered {}", answer.status));
+        }
+        let token = answer
+            .body
+            .get("token")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "login failed: State answered no token".to_owned())?
+            .to_owned();
+        *self.token.borrow_mut() = Some(token.clone());
+        Ok(token)
+    }
+
+    fn held_or_new_token(&self) -> Result<String, String> {
+        let held = self.token.borrow().clone();
+        match held {
+            Some(token) => Ok(token),
+            None => self.obtain_token(),
+        }
+    }
+
+    fn write(&self, path: &str, body: &impl Serialize, accepted: &[u16]) -> Result<(), WriteError> {
+        let mut answer = self.post_authorised(path, body)?;
+        if answer.status == 401 {
+            self.obtain_token().map_err(WriteError::Login)?;
+            answer = self.post_authorised(path, body)?;
+        }
+        if accepted.contains(&answer.status) {
+            Ok(())
+        } else {
+            Err(WriteError::Refused {
+                status: answer.status,
+                messages: answer.messages(),
+            })
+        }
+    }
+
+    fn post_authorised(&self, path: &str, body: &impl Serialize) -> Result<Answer, WriteError> {
+        let token = self.held_or_new_token().map_err(WriteError::Login)?;
+        self.post(path, body, Some(&token))
+            .map_err(WriteError::Transport)
+    }
+
+    fn post(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+        token: Option<&str>,
+    ) -> Result<Answer, String> {
         let url = format!("{}{path}", self.base_url);
-        let mut response = self
-            .agent
-            .post(&url)
+        let mut request = self.agent.post(&url);
+        if let Some(token) = token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        let mut response = request
             .send_json(body)
             .map_err(|e| format!("{url} could not be reached: {e}"))?;
         let status = response.status().as_u16();
@@ -89,10 +204,20 @@ impl HttpState {
 
 impl StateValidator for HttpState {
     fn validate_version(&self, body: &VersionBody) -> Result<Answer, String> {
-        self.post("/validate/versions", body)
+        self.post("/validate/versions", body, None)
     }
 
     fn validate_candidate(&self, body: &CandidateBody) -> Result<Answer, String> {
-        self.post("/validate/candidates", body)
+        self.post("/validate/candidates", body, None)
+    }
+}
+
+impl StateWriter for HttpState {
+    fn post_candidate(&self, body: &CandidateBody) -> Result<(), WriteError> {
+        self.write("/admin/candidates", body, &[200, 201])
+    }
+
+    fn post_version(&self, body: &VersionBody) -> Result<(), WriteError> {
+        self.write("/versions", body, &[204])
     }
 }
