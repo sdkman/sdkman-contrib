@@ -9,12 +9,11 @@ use sdkman_contrib::state_api::Answer;
 use serde_json::json;
 use support::archives::write_zip;
 use support::fakes::{FakeArchives, FakeValidator};
+use support::fixtures::{GOOD_ENTRIES_1_2_0 as GOOD_ENTRIES, REGISTRATION, REGISTRATION_PATH};
 use support::repo::TempRepo;
 use tempfile::TempDir;
 
-const REGISTRATION_PATH: &str = "requests/jpx/20261008T120000Z-register-jpx.yaml";
 const RELEASE_PATH: &str = "requests/jpx/20261008T130000Z-release-jpx-1.2.0.yaml";
-const REGISTRATION: &str = "candidate: jpx\nregister:\n  name: JPX\n  description: JPX is a tool.\n  website: https://jpx.dev/\n";
 const RELEASE: &str = "candidate: jpx\ndefault: 1.2.0\nversions:\n  - version: 1.2.0\n    platforms:\n      LINUX_X64: https://downloads.jpx.dev/jpx-1.2.0.zip\n";
 
 fn repo_listing(candidates: &str) -> TempRepo {
@@ -159,11 +158,6 @@ fn request_after_latest_receipt_is_admitted() {
 
 const ARCHIVE_URL: &str = "https://downloads.jpx.dev/jpx-1.2.0.zip";
 const OTHER_URL: &str = "https://downloads.jpx.dev/jpx-1.3.0.zip";
-const GOOD_ENTRIES: [(&str, u32); 3] = [
-    ("jpx-1.2.0/", 0o755),
-    ("jpx-1.2.0/bin/", 0o755),
-    ("jpx-1.2.0/bin/jpx", 0o755),
-];
 
 fn refusal(message: &str) -> Result<Answer, String> {
     Ok(Answer {

@@ -1,8 +1,9 @@
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use tempfile::TempDir;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
@@ -38,4 +39,10 @@ pub fn write_tar_gz(path: &Path, entries: &[(&str, u32)]) {
             .unwrap();
     }
     builder.into_inner().unwrap().finish().unwrap();
+}
+
+pub fn tar_gz(dir: &TempDir, name: &str, entries: &[(&str, u32)]) -> PathBuf {
+    let path = dir.path().join(name);
+    write_tar_gz(&path, entries);
+    path
 }

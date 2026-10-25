@@ -67,6 +67,10 @@ impl FakeState {
     pub fn requests(&self) -> Vec<Recorded> {
         self.requests.lock().unwrap().clone()
     }
+
+    pub fn paths(&self) -> Vec<String> {
+        self.requests().into_iter().map(|r| r.path).collect()
+    }
 }
 
 impl Drop for FakeState {

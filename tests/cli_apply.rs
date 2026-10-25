@@ -2,18 +2,16 @@ mod support;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use support::cli::contrib_command;
 use support::fake_state::FakeState;
+use support::fixtures::{REGISTRATION, REGISTRATION_PATH};
 use support::repo::TempRepo;
 
-const REGISTRATION_PATH: &str = "requests/jpx/20261008T120000Z-register-jpx.yaml";
-const REGISTRATION: &str = "candidate: jpx\nregister:\n  name: JPX\n  description: JPX is a tool.\n  website: https://jpx.dev/\n";
 const LOGIN_OK: (u16, &str) = (200, r#"{"token":"t1"}"#);
 
 fn contrib(repo: &TempRepo, state: &FakeState) -> Command {
-    let mut command = Command::new(assert_cmd::cargo::cargo_bin!("contrib"));
+    let mut command = contrib_command(repo, state);
     command
-        .current_dir(repo.path())
-        .env("CONTRIB_STATE_URL", &state.url)
         .env("COMMUNITY_EMAIL", "bot@example.com")
         .env("COMMUNITY_PASSWORD", "secret");
     command
@@ -26,10 +24,6 @@ fn repo_with_pending_registration() -> TempRepo {
     repo.commit_all("add request");
     repo.push();
     repo
-}
-
-fn paths(state: &FakeState) -> Vec<String> {
-    state.requests().into_iter().map(|r| r.path).collect()
 }
 
 #[test]
@@ -49,7 +43,7 @@ fn apply_pushes_registration_receipt() {
             state.url
         )));
 
-    assert_eq!(paths(&state), vec!["/login", "/admin/candidates"]);
+    assert_eq!(state.paths(), vec!["/login", "/admin/candidates"]);
     assert!(
         repo.remote_log()
             .contains(&format!("chore(apply): record {REGISTRATION_PATH}"))
@@ -81,7 +75,7 @@ fn apply_exits_1_when_login_fails() {
         .assert()
         .code(1)
         .stderr(predicate::str::contains("login failed: State answered 401"));
-    assert_eq!(paths(&state), vec!["/login"]);
+    assert_eq!(state.paths(), vec!["/login"]);
 }
 
 #[test]
@@ -105,7 +99,7 @@ fn void_records_a_receipt_and_writes_nothing_to_state() {
         .assert()
         .success();
 
-    assert_eq!(paths(&state), vec!["/login"]);
+    assert_eq!(state.paths(), vec!["/login"]);
     assert!(
         repo.remote_log()
             .contains(&format!("chore(apply): void {REGISTRATION_PATH}"))

@@ -1,20 +1,15 @@
 mod support;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use sdkman_contrib::request::{Archive, Release, ReleaseVersion};
 use sdkman_contrib::verify::verify_release;
-use support::archives::write_tar_gz;
+use support::archives::tar_gz;
 use support::fakes::FakeArchives;
+use support::fixtures::GOOD_ENTRIES;
 use tempfile::TempDir;
 
 const GOOD_URL: &str = "https://dl.example/jpx-1.0.0.tar.gz";
-const GOOD_ENTRIES: [(&str, u32); 3] = [
-    ("jpx-1.0.0/", 0o755),
-    ("jpx-1.0.0/bin/", 0o755),
-    ("jpx-1.0.0/bin/jpx", 0o755),
-];
 
 fn archive(url: &str) -> Archive {
     Archive {
@@ -40,12 +35,6 @@ fn release(versions: Vec<(&str, Vec<(&str, Archive)>)>) -> Release {
             .collect(),
         default: None,
     }
-}
-
-fn tar_gz(dir: &TempDir, name: &str, entries: &[(&str, u32)]) -> PathBuf {
-    let path = dir.path().join(name);
-    write_tar_gz(&path, entries);
-    path
 }
 
 #[test]

@@ -130,10 +130,6 @@ fn community(url: &str) -> HttpState {
     )
 }
 
-fn paths(state: &FakeState) -> Vec<String> {
-    state.requests().into_iter().map(|r| r.path).collect()
-}
-
 #[test]
 fn login_posts_credentials() {
     let state = FakeState::answering(&[TOKEN_ONE]);
@@ -176,7 +172,7 @@ fn version_write_logs_in_first_and_sends_bearer() {
     let state = FakeState::answering(&[TOKEN_ONE, (204, "")]);
     community(&state.url).post_version(&version_body()).unwrap();
     let requests = state.requests();
-    assert_eq!(paths(&state), vec!["/login", "/versions"]);
+    assert_eq!(state.paths(), vec!["/login", "/versions"]);
     assert_eq!(requests[1].authorization.as_deref(), Some("Bearer t1"));
     let posted: Value = serde_json::from_str(&requests[1].body).unwrap();
     assert_eq!(posted, serde_json::to_value(version_body()).unwrap());
@@ -189,7 +185,7 @@ fn candidate_write_accepts_200_and_201_on_one_login() {
     writer.post_candidate(&candidate_body()).unwrap();
     writer.post_candidate(&candidate_body()).unwrap();
     assert_eq!(
-        paths(&state),
+        state.paths(),
         vec!["/login", "/admin/candidates", "/admin/candidates"]
     );
 }
@@ -228,7 +224,7 @@ fn relogs_in_once_after_401() {
     community(&state.url).post_version(&version_body()).unwrap();
     let requests = state.requests();
     assert_eq!(
-        paths(&state),
+        state.paths(),
         vec!["/login", "/versions", "/login", "/versions"]
     );
     assert_eq!(requests[3].authorization.as_deref(), Some("Bearer t2"));

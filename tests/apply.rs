@@ -1,26 +1,23 @@
 mod support;
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use sdkman_contrib::apply::{ApplyError, RunInfo, apply_queue, apply_request, void_request};
 use sdkman_contrib::git::Git;
 use sdkman_contrib::receipt::{Receipt, ReceiptRow, StableTag};
 use sdkman_contrib::request::{Archive, Registration, Release, ReleaseVersion, Request};
+use sdkman_contrib::request_path::RequestPath;
 use sdkman_contrib::state_api::WriteError;
 use sha2::{Digest, Sha256};
-use support::archives::write_tar_gz;
+use support::archives::tar_gz;
 use support::fakes::{FakeArchives, FakeWriter};
+use support::fixtures::GOOD_ENTRIES;
 use support::repo::TempRepo;
 use tempfile::TempDir;
 
 const COMMIT: &str = "9e07d13";
-const GOOD_ENTRIES: [(&str, u32); 3] = [
-    ("jpx-1.0.0/", 0o755),
-    ("jpx-1.0.0/bin/", 0o755),
-    ("jpx-1.0.0/bin/jpx", 0o755),
-];
 
 fn url(version: &str) -> String {
     format!("https://dl.example/jpx-{version}.tar.gz")
@@ -47,12 +44,6 @@ fn release(versions: Vec<(&str, Archive)>, default: Option<&str>) -> Request {
             .collect(),
         default: default.map(str::to_owned),
     })
-}
-
-fn tar_gz(dir: &TempDir, name: &str, entries: &[(&str, u32)]) -> PathBuf {
-    let path = dir.path().join(name);
-    write_tar_gz(&path, entries);
-    path
 }
 
 fn sha256_of(path: &Path) -> String {
@@ -364,15 +355,16 @@ fn tomcat_archives(dir: &TempDir) -> FakeArchives {
 }
 
 fn read_receipt(repo: &TempRepo, request: &str) -> Receipt {
-    let text = std::fs::read_to_string(repo.path().join(request.replace("requests/", ".applied/")))
-        .unwrap();
+    let text = std::fs::read_to_string(repo.path().join(receipt_path(request))).unwrap();
     serde_norway::from_str(&text).unwrap()
 }
 
 fn has_receipt(repo: &TempRepo, request: &str) -> bool {
-    repo.path()
-        .join(request.replace("requests/", ".applied/"))
-        .exists()
+    repo.path().join(receipt_path(request)).exists()
+}
+
+fn receipt_path(request: &str) -> String {
+    RequestPath::parse(request).unwrap().receipt_path()
 }
 
 #[test]

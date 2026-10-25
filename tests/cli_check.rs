@@ -1,26 +1,16 @@
 mod support;
 
-use assert_cmd::Command;
 use predicates::prelude::*;
+use support::cli::contrib_command as contrib;
 use support::fake_state::FakeState;
+use support::fixtures::{REGISTRATION, REGISTRATION_PATH};
 use support::repo::TempRepo;
-
-const REGISTRATION_PATH: &str = "requests/jpx/20261008T120000Z-register-jpx.yaml";
-const REGISTRATION: &str = "candidate: jpx\nregister:\n  name: JPX\n  description: JPX is a tool.\n  website: https://jpx.dev/\n";
 
 fn repo_with_registration() -> TempRepo {
     let repo = TempRepo::new();
     repo.write("contrib-candidates.txt", "jpx\n");
     repo.write(REGISTRATION_PATH, REGISTRATION);
     repo
-}
-
-fn contrib(repo: &TempRepo, state: &FakeState) -> Command {
-    let mut command = Command::new(assert_cmd::cargo::cargo_bin!("contrib"));
-    command
-        .current_dir(repo.path())
-        .env("CONTRIB_STATE_URL", &state.url);
-    command
 }
 
 #[test]
