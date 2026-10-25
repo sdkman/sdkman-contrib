@@ -5,10 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::request_path::{NamingError, RequestPath, Timestamp};
-
-const REQUESTS_DIR: &str = "requests";
-const APPLIED_DIR: &str = ".applied";
+use crate::request_path::{APPLIED_DIR, NamingError, REQUESTS_DIR, RequestPath, Timestamp};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptRow {
@@ -141,16 +138,20 @@ pub fn write_receipt(
     receipt: &Receipt,
 ) -> Result<(), ReceiptError> {
     let yaml = serde_norway::to_string(receipt).map_err(ReceiptError::Yaml)?;
-    let target = repo_root.join(request.receipt_path());
+    write_new(repo_root, &request.receipt_path(), &yaml)?;
+    Ok(())
+}
+
+pub fn write_new(repo_root: &Path, relative: &str, text: &str) -> io::Result<()> {
+    let target = repo_root.join(relative);
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut file = OpenOptions::new()
+    OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(target)?;
-    file.write_all(yaml.as_bytes())?;
-    Ok(())
+        .open(target)?
+        .write_all(text.as_bytes())
 }
 
 #[cfg(test)]

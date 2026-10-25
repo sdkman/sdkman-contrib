@@ -1,38 +1,32 @@
 use std::path::Path;
-use std::process::Command;
 
-const REQUESTS_DIR: &str = "requests/";
-const RECEIPTS_DIR: &str = ".applied/";
+use crate::git::Git;
+use crate::request_path::{APPLIED_DIR, REQUESTS_DIR};
 
 pub fn added_request(repo_root: &Path, base: &str) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["diff", "--name-status", "--no-renames", base, "HEAD"])
-        .output()
-        .map_err(|error| format!("cannot run git: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "git diff against {base} failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let diff = String::from_utf8_lossy(&output.stdout);
+    let diff = Git::new(repo_root)
+        .run_as(
+            &format!("diff against {base}"),
+            &["diff", "--name-status", "--no-renames", base, "HEAD"],
+        )
+        .map_err(|error| error.to_string())?;
     let changes: Vec<(&str, &str)> = diff
         .lines()
         .filter_map(|line| line.split_once('\t'))
         .collect();
 
-    if let Some((_, path)) = changes
-        .iter()
-        .find(|(_, path)| path.starts_with(RECEIPTS_DIR))
-    {
+    if let Some((_, path)) = changes.iter().find(|(_, path)| is_below(path, APPLIED_DIR)) {
         return Err(format!(
-            "{path} is under .applied/; only the apply bot writes receipts"
+            "{path} is under {APPLIED_DIR}/; only the apply bot writes receipts"
         ));
     }
     match changes.as_slice() {
-        [("A", path)] if path.starts_with(REQUESTS_DIR) => Ok((*path).to_owned()),
+        [("A", path)] if is_below(path, REQUESTS_DIR) => Ok((*path).to_owned()),
         _ => Err("a request PR adds exactly one file under requests/".to_owned()),
     }
+}
+
+fn is_below(path: &str, dir: &str) -> bool {
+    path.strip_prefix(dir)
+        .is_some_and(|rest| rest.starts_with('/'))
 }

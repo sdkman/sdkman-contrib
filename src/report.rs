@@ -74,6 +74,10 @@ impl Report {
     }
 }
 
+pub fn row_subject(candidate: &str, version: &str, platform: &str) -> String {
+    format!("{candidate} {version} {platform}")
+}
+
 pub fn row_line(candidate: &str, row: &RowCheck, state_failures: &[String]) -> ReportLine {
     let status = if !row.failures.is_empty() || !state_failures.is_empty() {
         Status::Fail
@@ -106,7 +110,7 @@ pub fn row_line(candidate: &str, row: &RowCheck, state_failures: &[String]) -> R
         .join("; ");
     ReportLine {
         status,
-        subject: format!("{candidate} {} {}", row.version, row.platform),
+        subject: row_subject(candidate, &row.version, &row.platform),
         detail,
     }
 }

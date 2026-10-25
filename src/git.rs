@@ -50,7 +50,11 @@ impl Git {
         Ok(())
     }
 
-    fn run(&self, args: &[&str]) -> Result<String, GitError> {
+    pub fn run(&self, args: &[&str]) -> Result<String, GitError> {
+        self.run_as(args[0], args)
+    }
+
+    pub fn run_as(&self, label: &str, args: &[&str]) -> Result<String, GitError> {
         let output = Command::new("git")
             .arg("-C")
             .arg(&self.root)
@@ -59,8 +63,7 @@ impl Git {
             .map_err(|error| GitError(format!("cannot run git: {error}")))?;
         if !output.status.success() {
             return Err(GitError(format!(
-                "git {} failed: {}",
-                args[0],
+                "git {label} failed: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }

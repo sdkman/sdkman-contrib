@@ -1,9 +1,9 @@
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
 
+use crate::receipt::write_new;
 use crate::request_path::{Kind, NamingError, RequestPath, Timestamp, slugify};
 
 pub fn skeleton_path(
@@ -12,14 +12,13 @@ pub fn skeleton_path(
     slug_source: &str,
     now: DateTime<Utc>,
 ) -> Result<String, NamingError> {
-    let path = format!(
-        "requests/{candidate}/{}-{}-{}.yaml",
+    RequestPath::new(
+        candidate,
         Timestamp::from_utc(now),
-        kind.as_str(),
-        slugify(slug_source)
-    );
-    RequestPath::parse(&path)?;
-    Ok(path)
+        kind,
+        &slugify(slug_source),
+    )
+    .map(|path| path.repo_path())
 }
 
 pub fn registration_skeleton(candidate: &str) -> String {
@@ -39,15 +38,7 @@ pub fn release_skeleton(candidate: &str, version: &str, platforms: &[String]) ->
 }
 
 pub fn write_skeleton(repo_root: &Path, path: &str, text: &str) -> io::Result<()> {
-    let target = repo_root.join(path);
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(target)?
-        .write_all(text.as_bytes())
+    write_new(repo_root, path, text)
 }
 
 #[cfg(test)]

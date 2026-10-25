@@ -1,9 +1,9 @@
+use chrono::{DateTime, NaiveDateTime, Timelike, Utc};
 use std::cmp::Ordering;
 use std::fmt;
-use std::path::PathBuf;
 
-use chrono::{DateTime, NaiveDateTime, Timelike, Utc};
-
+pub const REQUESTS_DIR: &str = "requests";
+pub const APPLIED_DIR: &str = ".applied";
 const TIMESTAMP_FORMAT: &str = "%Y%m%dT%H%M%SZ";
 const TIMESTAMP_LEN: usize = 16;
 const EXTENSION: &str = ".yaml";
@@ -103,7 +103,7 @@ impl RequestPath {
                 "`{path}` is not three segments below the repository root"
             )));
         };
-        if root != "requests" || candidate.is_empty() {
+        if root != REQUESTS_DIR || candidate.is_empty() {
             return Err(NamingError::new(format!(
                 "`{path}` is not below requests/<candidate>/"
             )));
@@ -127,6 +127,20 @@ impl RequestPath {
                 "`{file_name}` kind is not `register` or `release`"
             )));
         };
+        Self::new(candidate, timestamp, kind, slug)
+    }
+
+    pub fn new(
+        candidate: &str,
+        timestamp: Timestamp,
+        kind: Kind,
+        slug: &str,
+    ) -> Result<Self, NamingError> {
+        if candidate.is_empty() || candidate.contains('/') {
+            return Err(NamingError::new(format!(
+                "candidate `{candidate}` is not a single path segment"
+            )));
+        }
         if slug.is_empty() || !slug.chars().all(is_slug_char) {
             return Err(NamingError::new(format!(
                 "slug `{slug}` is not lowercase letters, digits, `.` and `-`"
@@ -165,16 +179,16 @@ impl RequestPath {
         )
     }
 
-    pub fn repo_path(&self) -> PathBuf {
-        self.below("requests")
+    pub fn repo_path(&self) -> String {
+        self.below(REQUESTS_DIR)
     }
 
-    pub fn receipt_path(&self) -> PathBuf {
-        self.below(".applied")
+    pub fn receipt_path(&self) -> String {
+        self.below(APPLIED_DIR)
     }
 
-    fn below(&self, root: &str) -> PathBuf {
-        [root, &self.candidate, &self.file_name()].iter().collect()
+    fn below(&self, root: &str) -> String {
+        format!("{root}/{}/{}", self.candidate, self.file_name())
     }
 }
 
@@ -222,7 +236,6 @@ pub fn slugify(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     fn parse(path: &str) -> RequestPath {
         RequestPath::parse(path).unwrap()
@@ -310,11 +323,11 @@ mod tests {
         let parsed = parse("requests/tomcat/20261009T081500Z-release-11.0.15.yaml");
         assert_eq!(
             parsed.repo_path(),
-            Path::new("requests/tomcat/20261009T081500Z-release-11.0.15.yaml")
+            "requests/tomcat/20261009T081500Z-release-11.0.15.yaml"
         );
         assert_eq!(
             parsed.receipt_path(),
-            Path::new(".applied/tomcat/20261009T081500Z-release-11.0.15.yaml")
+            ".applied/tomcat/20261009T081500Z-release-11.0.15.yaml"
         );
     }
 

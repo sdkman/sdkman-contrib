@@ -10,6 +10,7 @@ use crate::load::load_request;
 use crate::receipt::{
     Receipt, ReceiptRow, RegisteredMetadata, StableTag, pending_requests, write_receipt,
 };
+use crate::report::row_subject;
 use crate::request::{Registration, Release, Request};
 use crate::request_path::RequestPath;
 use crate::state_api::{StateWriter, WriteError};
@@ -85,10 +86,7 @@ pub fn apply_queue(
     })?;
     let mut applied = Vec::new();
     for pending_path in pending {
-        let repo_path = pending_path
-            .repo_path()
-            .to_string_lossy()
-            .replace('\\', "/");
+        let repo_path = pending_path.repo_path();
         apply_pending(repo_root, &repo_path, writer, archives, git, run).map_err(|cause| {
             ApplyError::Request {
                 path: repo_path.clone(),
@@ -112,10 +110,7 @@ fn apply_pending(
     admit_timestamp(repo_root, &path, Utc::now()).map_err(rejected)?;
     let commit = git.added_in(repo_path).map_err(rejected)?;
     let receipt = apply_request(&request, writer, archives, &commit, run)?;
-    write_receipt(repo_root, &path, &receipt).map_err(rejected)?;
-    let receipt_path = path.receipt_path().to_string_lossy().replace('\\', "/");
-    git.commit_and_push(&receipt_path, &format!("chore(apply): record {repo_path}"))
-        .map_err(rejected)
+    record_receipt(repo_root, git, &path, &receipt, "record")
 }
 
 pub fn void_request(
@@ -142,23 +137,42 @@ fn void_pending(
     if !repo_root.join(repo_path).is_file() {
         return Err(rejected("no such request"));
     }
-    let receipt_path = path.receipt_path().to_string_lossy().replace('\\', "/");
-    if repo_root.join(&receipt_path).exists() {
+    if repo_root.join(path.receipt_path()).exists() {
         return Err(rejected("already has a receipt"));
     }
     let commit = git.added_in(repo_path).map_err(rejected)?;
     let receipt = Receipt {
+        voided: Some(reason.to_owned()),
+        ..blank_receipt(run, &commit)
+    };
+    record_receipt(repo_root, git, &path, &receipt, "void")
+}
+
+fn record_receipt(
+    repo_root: &Path,
+    git: &Git,
+    path: &RequestPath,
+    receipt: &Receipt,
+    verb: &str,
+) -> Result<(), ApplyError> {
+    write_receipt(repo_root, path, receipt).map_err(rejected)?;
+    git.commit_and_push(
+        &path.receipt_path(),
+        &format!("chore(apply): {verb} {}", path.repo_path()),
+    )
+    .map_err(rejected)
+}
+
+fn blank_receipt(run: &RunInfo, commit: &str) -> Receipt {
+    Receipt {
         applied_at: run.applied_at.clone(),
-        commit,
+        commit: commit.to_owned(),
         run: run.run_url.clone(),
         rows: None,
         tag: None,
         register: None,
-        voided: Some(reason.to_owned()),
-    };
-    write_receipt(repo_root, &path, &receipt).map_err(rejected)?;
-    git.commit_and_push(&receipt_path, &format!("chore(apply): void {repo_path}"))
-        .map_err(rejected)
+        voided: None,
+    }
 }
 
 fn rejected(error: impl fmt::Display) -> ApplyError {
@@ -172,15 +186,7 @@ pub fn apply_request(
     commit: &str,
     run: &RunInfo,
 ) -> Result<Receipt, ApplyError> {
-    let receipt = Receipt {
-        applied_at: run.applied_at.clone(),
-        commit: commit.to_owned(),
-        run: run.run_url.clone(),
-        rows: None,
-        tag: None,
-        register: None,
-        voided: None,
-    };
+    let receipt = blank_receipt(run, commit);
     match request {
         Request::Registration(registration) => apply_registration(registration, writer, receipt),
         Request::Release(release) => apply_release(release, writer, archives, receipt),
@@ -220,8 +226,8 @@ fn apply_release(
         .flat_map(|row| {
             row.failures.iter().map(|failure| {
                 format!(
-                    "{} {} {}: {failure}",
-                    release.candidate, row.version, row.platform
+                    "{}: {failure}",
+                    row_subject(&release.candidate, &row.version, &row.platform)
                 )
             })
         })
@@ -234,8 +240,8 @@ fn apply_release(
         .map(|row| {
             version_body(release, row).ok_or_else(|| {
                 ApplyError::Rejected(vec![format!(
-                    "{} {} {}: no digests",
-                    release.candidate, row.version, row.platform
+                    "{}: no digests",
+                    row_subject(&release.candidate, &row.version, &row.platform)
                 )])
             })
         })
@@ -244,7 +250,7 @@ fn apply_release(
         writer
             .post_version(body)
             .map_err(|error| ApplyError::Write {
-                subject: format!("{} {} {}", body.candidate, body.version, body.platform),
+                subject: row_subject(&body.candidate, &body.version, &body.platform),
                 error,
             })?;
     }
