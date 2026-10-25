@@ -642,7 +642,8 @@ fn applies_in_file_name_order_across_candidates() {
         &Git::new(repo.path()),
         &run(),
     )
-    .unwrap();
+    .unwrap()
+    .applied;
 
     assert_eq!(applied, vec![JPX_REGISTER, TOMCAT_RELEASE]);
     assert_eq!(writer.candidates().len(), 1);
@@ -692,7 +693,8 @@ fn failure_blocks_later_requests() {
         &git,
         &run(),
     )
-    .unwrap();
+    .unwrap()
+    .applied;
     assert_eq!(applied, vec![JPX_RELEASE, TOMCAT_RELEASE]);
 }
 
@@ -725,7 +727,8 @@ fn half_applied_release_reapplies_once() {
         &git,
         &run(),
     )
-    .unwrap();
+    .unwrap()
+    .applied;
 
     assert_eq!(applied, vec![JPX_RELEASE]);
     assert_eq!(writer.rows().len(), 2);
@@ -795,7 +798,8 @@ fn void_unblocks_the_queue() {
         &git,
         &run(),
     )
-    .unwrap();
+    .unwrap()
+    .applied;
 
     let receipt = read_receipt(&repo, JPX_RELEASE);
     assert_eq!(receipt.voided.as_deref(), Some("vendor withdrew it"));
@@ -872,4 +876,47 @@ fn void_of_an_uncommitted_request_is_a_failure_not_a_rejection() {
     };
     assert!(matches!(*cause, ApplyError::Failed(_)), "{cause:?}");
     assert!(!has_receipt(&repo, JPX_RELEASE));
+}
+
+#[test]
+fn blocked_request_skips_its_candidate() {
+    let dir = TempDir::new().unwrap();
+    let later_jpx = "requests/jpx/20261008T110000Z-release-1.1.0.yaml";
+    let (repo, _) = queue_repo(&[
+        (JPX_RELEASE, jpx_release_yaml(&["1.0.0"])),
+        (later_jpx, jpx_release_yaml(&["1.1.0"])),
+        (TOMCAT_RELEASE, tomcat_release_yaml()),
+    ]);
+    let writer = FakeWriter::default();
+    let archives = good_archives(&dir, &["1.0.0", "1.1.0"]).serving(
+        "https://dl.example/tomcat-11.0.15.tar.gz",
+        &tomcat_file(&dir),
+    );
+    let tomcat_only = FakeDigests::with_rows(vec![reviewed_row("11.0.15", &tomcat_file(&dir))]);
+
+    let outcome = apply_queue(
+        repo.path(),
+        &writer,
+        &archives,
+        &tomcat_only,
+        &Git::new(repo.path()),
+        &run(),
+    )
+    .unwrap();
+
+    assert_eq!(outcome.applied, vec![TOMCAT_RELEASE]);
+    assert_eq!(outcome.skipped, vec![later_jpx]);
+    assert_eq!(outcome.blocked.len(), 1);
+    assert_eq!(outcome.blocked[0].path, JPX_RELEASE);
+    assert!(
+        outcome.blocked[0]
+            .reason
+            .contains("not among the reviewed digests"),
+        "{}",
+        outcome.blocked[0].reason
+    );
+    assert_eq!(writer.rows().len(), 1);
+    assert!(!has_receipt(&repo, JPX_RELEASE));
+    assert!(!has_receipt(&repo, later_jpx));
+    assert!(has_receipt(&repo, TOMCAT_RELEASE));
 }
