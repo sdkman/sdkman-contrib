@@ -19,6 +19,22 @@ fn candidate_blocks(readme: &str) -> Vec<String> {
     blocks
 }
 
+/// From `heading` up to the next heading of the same or a higher level.
+fn readme_section<'a>(readme: &'a str, heading: &str) -> &'a str {
+    let level = |line: &str| line.len() - line.trim_start_matches('#').len();
+    let start = readme
+        .find(&format!("\n{heading}\n"))
+        .unwrap_or_else(|| panic!("README.md has a {heading} section"))
+        + 1;
+    let section = &readme[start..];
+    let end = section
+        .match_indices("\n#")
+        .map(|(index, _)| index)
+        .find(|&index| level(&section[index + 1..]) <= level(heading))
+        .unwrap_or(section.len());
+    &section[..end]
+}
+
 #[test]
 fn readme_examples_parse() {
     let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
@@ -54,10 +70,7 @@ fn readme_states_the_archive_rules() {
     let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
         .expect("README.md is readable");
 
-    let archives = readme
-        .split("\n## ")
-        .find(|section| section.starts_with("Archives"))
-        .expect("README.md has an Archives section");
+    let archives = readme_section(&readme, "## Archives");
 
     assert!(archives.contains("5 redirects"));
     assert!(archives.contains("/releases/latest/"));
@@ -69,16 +82,8 @@ fn readme_states_the_review_rules() {
     let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
         .expect("README.md is readable");
 
-    let section = |title: &str| {
-        readme
-            .split("\n#")
-            .map(|part| part.trim_start_matches('#'))
-            .find(|part| part.trim_start().starts_with(title))
-            .unwrap_or_else(|| panic!("README.md has a {title} section"))
-    };
-
-    assert!(section("Checksums").contains("byte for byte"));
-    assert!(section("The check on your PR").contains("never code from your PR"));
+    assert!(readme_section(&readme, "### Checksums").contains("byte for byte"));
+    assert!(readme_section(&readme, "## The check on your PR").contains("never code from your PR"));
     assert!(!readme.contains("only thing that pins"));
 }
 
@@ -87,10 +92,7 @@ fn readme_names_the_install_path() {
     let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
         .expect("README.md is readable");
 
-    let install = readme
-        .split("\n## ")
-        .find(|section| section.starts_with("Installing contrib"))
-        .expect("README.md has an Installing contrib section");
+    let install = readme_section(&readme, "## Installing contrib");
 
     assert!(readme.find("## Installing contrib") < readme.find("## How it works"));
     for literal in [
