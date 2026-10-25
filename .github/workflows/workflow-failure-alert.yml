@@ -1,0 +1,11 @@
+name: Workflow Failure Alert
+on:
+  workflow_run:
+    workflows: ["*"]
+    branches: [main]
+    types: [completed]
+jobs:
+  notify:
+    if: github.event.workflow_run.event != 'pull_request'
+    uses: sdkman/.github/.github/workflows/reusable-workflow-failure-alert.yml@main
+    secrets: inherit
