@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `src/lib.rs` - the library the CLI and the tests share
 - `tests/*.rs` - integration tests; shared helpers in `tests/support/`
 - `.github/workflows/` - the GitHub workflows; `pull-requests.yml` holds no secrets
+- `.github/rulesets/main.json`, `scripts/protect-main.sh` - the ruleset of `main` and the script a maintainer runs once to apply it
 
 ## Boundaries
 
@@ -28,4 +29,5 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 nix run nixpkgs#actionlint -- -ignore 'unexpected key "queue"'
+nix run nixpkgs#shellcheck -- scripts/protect-main.sh
 ```
