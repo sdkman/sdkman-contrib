@@ -196,15 +196,9 @@ fn write_digests(path: &Path, digests: &CheckDigests) -> Result<(), String> {
 }
 
 fn apply(args: ApplyArgs) -> ExitCode {
-    let credentials = match (
-        non_empty_env("COMMUNITY_EMAIL"),
-        non_empty_env("COMMUNITY_PASSWORD"),
-    ) {
-        (Some(email), Some(password)) => Credentials { email, password },
-        _ => {
-            eprintln!("missing COMMUNITY_EMAIL or COMMUNITY_PASSWORD");
-            return ExitCode::from(2);
-        }
+    let credentials = match credentials_from_env("COMMUNITY_EMAIL", "COMMUNITY_PASSWORD") {
+        Ok(credentials) => credentials,
+        Err(code) => return code,
     };
     let (Some(repository), Some(github_token)) = (
         non_empty_env("GITHUB_REPOSITORY"),
@@ -218,11 +212,10 @@ fn apply(args: ApplyArgs) -> ExitCode {
     let state_url = resolve_state_url(env::var("CONTRIB_STATE_URL").ok());
     eprintln!("applying to {state_url}");
 
-    let state = HttpState::with_credentials(&state_url, credentials);
-    if let Err(message) = state.login() {
-        eprintln!("{message}");
-        return ExitCode::FAILURE;
-    }
+    let state = match login_to_state(&state_url, credentials) {
+        Ok(state) => state,
+        Err(code) => return code,
+    };
 
     let repo_root = env::current_dir().expect("current directory");
     let git = Git::new(&repo_root);
@@ -261,12 +254,9 @@ fn apply(args: ApplyArgs) -> ExitCode {
 }
 
 fn publish(args: PublishArgs) -> ExitCode {
-    let (Some(email), Some(password)) = (
-        non_empty_env("VENDOR_EMAIL"),
-        non_empty_env("VENDOR_PASSWORD"),
-    ) else {
-        eprintln!("missing VENDOR_EMAIL or VENDOR_PASSWORD");
-        return ExitCode::from(2);
+    let credentials = match credentials_from_env("VENDOR_EMAIL", "VENDOR_PASSWORD") {
+        Ok(credentials) => credentials,
+        Err(code) => return code,
     };
     let version = env!("CARGO_PKG_VERSION");
     let bodies = match release_bodies(&args.directory, version, &args.url_base) {
@@ -279,11 +269,10 @@ fn publish(args: PublishArgs) -> ExitCode {
     let state_url = resolve_state_url(env::var("CONTRIB_STATE_URL").ok());
     eprintln!("publishing to {state_url}");
 
-    let state = HttpState::with_credentials(&state_url, Credentials { email, password });
-    if let Err(message) = state.login() {
-        eprintln!("{message}");
-        return ExitCode::FAILURE;
-    }
+    let state = match login_to_state(&state_url, credentials) {
+        Ok(state) => state,
+        Err(code) => return code,
+    };
     match publish_release(&state, &bodies) {
         Ok(()) => {
             println!("published contrib {version}");
@@ -292,6 +281,33 @@ fn publish(args: PublishArgs) -> ExitCode {
         Err(error) => {
             eprintln!("{error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+fn credentials_from_env(
+    email_variable: &str,
+    password_variable: &str,
+) -> Result<Credentials, ExitCode> {
+    match (
+        non_empty_env(email_variable),
+        non_empty_env(password_variable),
+    ) {
+        (Some(email), Some(password)) => Ok(Credentials { email, password }),
+        _ => {
+            eprintln!("missing {email_variable} or {password_variable}");
+            Err(ExitCode::from(2))
+        }
+    }
+}
+
+fn login_to_state(state_url: &str, credentials: Credentials) -> Result<HttpState, ExitCode> {
+    let state = HttpState::with_credentials(state_url, credentials);
+    match state.login() {
+        Ok(()) => Ok(state),
+        Err(message) => {
+            eprintln!("{message}");
+            Err(ExitCode::FAILURE)
         }
     }
 }
