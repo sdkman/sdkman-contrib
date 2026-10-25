@@ -175,11 +175,11 @@ You may declare any of `md5`, `sha256` and `sha512` for an archive. Each one you
 
 CI also computes the sha256 of every archive, so every row written to State carries at least a sha256, even when you declared none. State receives the computed sha256 plus any `md5` or `sha512` you declared.
 
-A declared checksum is the only thing that pins an archive to what the reviewer saw. Declare one when you can.
+The apply blocks an archive that differs, byte for byte, from the one the check downloaded, whether or not you declared a checksum.
 
 ## The check on your PR
 
-The check runs on every request PR, and fork PRs included. It needs no secrets. It:
+The check runs on every request PR, and fork PRs included. It needs no secrets. It runs `contrib` from `main`, never code from your PR, and reads your PR only as data. It:
 
 1. confirms the PR adds exactly one file under `requests/` and nothing else;
 2. checks the file name, parses the file strictly, and confirms the directory and kind match the content;
@@ -206,7 +206,9 @@ A PR that touches `.applied/` fails the check. Only the apply bot writes receipt
 
 A maintainer approves every PR. Approval is never delegated to candidate owners or vendors.
 
-A job on `main` then applies the pending requests, in file-name order, one run at a time. It re-reads each request under the same rules, downloads each archive again, and writes to the State API. It stops at the first failure. A failed request stays pending, the next run retries it, and the requests ordered after it wait. That keeps a release from landing before its registration.
+A job on `main` then applies the pending requests, in file-name order, one run at a time. It re-reads each request under the same rules, downloads each archive again, and writes to the State API. Except for a blocked request, it stops at the first failure. A failed request stays pending, the next run retries it, and the requests ordered after it wait. That keeps a release from landing before its registration.
+
+An archive that changed since the check blocks its request. The request writes nothing to State and stays pending, and so do the later requests of the same candidate. The requests of other candidates still apply. The run fails, and the block holds until a maintainer voids the request.
 
 Applying is safe to repeat. A half-applied release finishes on the next run, and nothing is rolled back.
 
