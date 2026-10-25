@@ -239,3 +239,37 @@ fn second_401_is_refused_without_a_third_login() {
     assert!(matches!(error, WriteError::Refused { status: 401, .. }));
     assert_eq!(state.requests().len(), 4);
 }
+
+#[test]
+fn failure_without_message_falls_back_to_status() {
+    let state = FakeState::answering(&[(
+        400,
+        r#"{"error":"Validation Error","failures":[{"field":"url"}]}"#,
+    )]);
+    let answer = HttpState::new(&state.url)
+        .validate_version(&version_body())
+        .unwrap();
+    assert_eq!(answer.messages(), vec!["State answered 400"]);
+}
+
+#[test]
+fn trailing_slash_is_trimmed_from_the_base_url() {
+    let state = FakeState::answering(&[(204, "")]);
+    HttpState::new(&format!("{}/", state.url))
+        .validate_version(&version_body())
+        .unwrap();
+    assert_eq!(state.paths(), vec!["/validate/versions"]);
+}
+
+#[test]
+fn failed_relogin_after_401_is_a_login_error() {
+    let state = FakeState::answering(&[TOKEN_ONE, (401, ""), (401, "")]);
+    let error = community(&state.url)
+        .post_version(&version_body())
+        .unwrap_err();
+    assert_eq!(
+        error,
+        WriteError::Login("login failed: State answered 401".to_owned())
+    );
+    assert_eq!(state.paths(), vec!["/login", "/versions", "/login"]);
+}

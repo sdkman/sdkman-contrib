@@ -165,3 +165,17 @@ fn rows_follow_version_then_platform_order() {
         ]
     );
 }
+
+#[test]
+fn url_warning_reaches_the_row() {
+    let dir = TempDir::new().unwrap();
+    let url = "https://dl.example/tool.tar.gz";
+    let fakes = FakeArchives::default().serving(url, &tar_gz(&dir, "a.tar.gz", &GOOD_ENTRIES));
+    let rows = verify_release(
+        &release(vec![("1.0.0", vec![("LINUX_X64", archive(url))])]),
+        &fakes,
+    );
+    assert!(rows[0].passed());
+    assert_eq!(rows[0].warnings.len(), 1);
+    assert!(rows[0].warnings[0].contains("does not follow"));
+}

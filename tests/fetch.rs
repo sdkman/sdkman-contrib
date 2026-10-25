@@ -95,3 +95,12 @@ fn stalled_server_is_a_transport_error() {
     assert!(matches!(error, Some(FetchError::Transport(_))), "{error:?}");
     stalled.join().unwrap();
 }
+
+#[test]
+fn closed_port_is_a_transport_error() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/jpx-1.0.zip", server.server_addr());
+    drop(server);
+    let error = HttpArchiveSource::new().fetch(&url).err();
+    assert!(matches!(error, Some(FetchError::Transport(_))), "{error:?}");
+}

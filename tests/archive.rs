@@ -4,6 +4,8 @@ use sdkman_contrib::archive::{
     ArchiveEntry, ArchiveFormat, Verdict, check_layout, inspect_archive, list_entries,
 };
 use support::archives::{write_tar_gz, write_zip};
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 fn entry(components: &[&str], is_dir: bool, executable: bool) -> ArchiveEntry {
     ArchiveEntry {
@@ -238,4 +240,19 @@ fn inspect_turns_a_read_error_into_one_failure() {
     let verdict = inspect_archive(&path, ArchiveFormat::Zip, "jpx", "1.2.0", "UNIVERSAL");
     assert_eq!(verdict.failures.len(), 1);
     assert!(verdict.failures[0].starts_with("not a zip archive: "));
+}
+
+#[test]
+fn zip_entry_without_unix_mode_is_not_executable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("jpx.zip");
+    let mut writer = ZipWriter::new(std::fs::File::create(&path).unwrap());
+    writer
+        .start_file("jpx-1.2.0/bin/jpx", SimpleFileOptions::default())
+        .unwrap();
+    writer.finish().unwrap();
+    assert_eq!(
+        list_entries(&path, ArchiveFormat::Zip).unwrap(),
+        vec![entry(&["jpx-1.2.0", "bin", "jpx"], false, false)]
+    );
 }

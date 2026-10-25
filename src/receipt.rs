@@ -317,4 +317,74 @@ mod tests {
         assert!(!text.contains("rows"));
         assert!(!text.contains("tag"));
     }
+
+    #[test]
+    fn receipt_yaml_follows_the_spec_order() {
+        let mut release = receipt();
+        release.rows = Some(vec![
+            ReceiptRow {
+                version: "1.2.0".into(),
+                platform: "LINUX_X64".into(),
+                sha256: "9c1e".into(),
+                md5: None,
+                sha512: None,
+            },
+            ReceiptRow {
+                version: "1.2.0".into(),
+                platform: "MAC_ARM64".into(),
+                sha256: "41ab".into(),
+                md5: Some("5d41".into()),
+                sha512: Some("7d0e".into()),
+            },
+        ]);
+        release.tag = Some(StableTag {
+            stable: "1.2.0".into(),
+        });
+        assert_eq!(
+            serde_norway::to_string(&release).unwrap(),
+            "applied_at: 2026-10-14T09:40:57Z\n\
+             commit: 9e07d13\n\
+             run: https://github.com/sdkman/sdkman-contrib/actions/runs/123\n\
+             rows:\n\
+             - version: 1.2.0\n\
+             \x20 platform: LINUX_X64\n\
+             \x20 sha256: 9c1e\n\
+             - version: 1.2.0\n\
+             \x20 platform: MAC_ARM64\n\
+             \x20 sha256: 41ab\n\
+             \x20 md5: 5d41\n\
+             \x20 sha512: 7d0e\n\
+             tag:\n\
+             \x20 stable: 1.2.0\n"
+        );
+
+        let mut registration = receipt();
+        registration.register = Some(RegisteredMetadata {
+            name: "JPX".into(),
+            description: "A tool".into(),
+            website: "https://example.com".into(),
+        });
+        assert_eq!(
+            serde_norway::to_string(&registration).unwrap(),
+            "applied_at: 2026-10-14T09:40:57Z\n\
+             commit: 9e07d13\n\
+             run: https://github.com/sdkman/sdkman-contrib/actions/runs/123\n\
+             register:\n\
+             \x20 name: JPX\n\
+             \x20 description: A tool\n\
+             \x20 website: https://example.com\n"
+        );
+    }
+
+    #[test]
+    fn latest_applied_skips_unparsable_names() {
+        let root = TempDir::new().unwrap();
+        touch(root.path(), ".applied/jpx/.gitkeep");
+        touch(
+            root.path(),
+            ".applied/jpx/20261008T140211Z-register-jpx.yaml",
+        );
+        let latest = latest_applied(root.path(), "jpx").unwrap().unwrap();
+        assert_eq!(latest.to_string(), "20261008T140211Z");
+    }
 }
