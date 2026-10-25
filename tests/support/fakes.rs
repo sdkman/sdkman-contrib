@@ -91,15 +91,19 @@ pub struct FakeWriter {
     candidates: RefCell<Vec<CandidateBody>>,
     rows: RefCell<BTreeMap<(String, String), VersionBody>>,
     attempts: Cell<usize>,
-    failing_row: Option<(String, String)>,
+    failing_row: RefCell<Option<(String, String)>>,
 }
 
 impl FakeWriter {
     pub fn failing_on(version: &str, platform: &str) -> Self {
         Self {
-            failing_row: Some((version.to_owned(), platform.to_owned())),
+            failing_row: RefCell::new(Some((version.to_owned(), platform.to_owned()))),
             ..Self::default()
         }
+    }
+
+    pub fn stop_failing(&self) {
+        self.failing_row.replace(None);
     }
 
     pub fn rows(&self) -> BTreeMap<(String, String), VersionBody> {
@@ -125,7 +129,7 @@ impl StateWriter for FakeWriter {
     fn post_version(&self, body: &VersionBody) -> Result<(), WriteError> {
         self.attempts.set(self.attempts.get() + 1);
         let key = (body.version.clone(), body.platform.clone());
-        if self.failing_row.as_ref() == Some(&key) {
+        if self.failing_row.borrow().as_ref() == Some(&key) {
             return Err(WriteError::Refused {
                 status: 400,
                 messages: vec!["refused on demand".to_owned()],

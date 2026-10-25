@@ -1,9 +1,15 @@
 use std::fmt;
+use std::path::Path;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 
+use crate::check::admit_timestamp;
 use crate::fetch::ArchiveSource;
-use crate::receipt::{Receipt, ReceiptRow, RegisteredMetadata, StableTag};
+use crate::git::Git;
+use crate::load::load_request;
+use crate::receipt::{
+    Receipt, ReceiptRow, RegisteredMetadata, StableTag, pending_requests, write_receipt,
+};
 use crate::request::{Registration, Release, Request};
 use crate::state_api::{StateWriter, WriteError};
 use crate::state_body::{candidate_body, version_body};
@@ -43,7 +49,14 @@ impl RunInfo {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApplyError {
     Rejected(Vec<String>),
-    Write { subject: String, error: WriteError },
+    Write {
+        subject: String,
+        error: WriteError,
+    },
+    Request {
+        path: String,
+        cause: Box<ApplyError>,
+    },
 }
 
 impl fmt::Display for ApplyError {
@@ -51,11 +64,62 @@ impl fmt::Display for ApplyError {
         match self {
             Self::Rejected(messages) => f.write_str(&messages.join("; ")),
             Self::Write { subject, error } => write!(f, "{subject}: {error}"),
+            Self::Request { path, cause } => write!(f, "{path}: {cause}"),
         }
     }
 }
 
 impl std::error::Error for ApplyError {}
+
+pub fn apply_queue(
+    repo_root: &Path,
+    writer: &dyn StateWriter,
+    archives: &dyn ArchiveSource,
+    git: &Git,
+    run: &RunInfo,
+) -> Result<Vec<String>, ApplyError> {
+    let pending = pending_requests(repo_root).map_err(|error| ApplyError::Request {
+        path: "requests".to_owned(),
+        cause: Box::new(rejected(error)),
+    })?;
+    let mut applied = Vec::new();
+    for pending_path in pending {
+        let repo_path = pending_path
+            .repo_path()
+            .to_string_lossy()
+            .replace('\\', "/");
+        apply_pending(repo_root, &repo_path, writer, archives, git, run).map_err(|cause| {
+            ApplyError::Request {
+                path: repo_path.clone(),
+                cause: Box::new(cause),
+            }
+        })?;
+        applied.push(repo_path);
+    }
+    Ok(applied)
+}
+
+fn apply_pending(
+    repo_root: &Path,
+    repo_path: &str,
+    writer: &dyn StateWriter,
+    archives: &dyn ArchiveSource,
+    git: &Git,
+    run: &RunInfo,
+) -> Result<(), ApplyError> {
+    let (path, request) = load_request(repo_root, repo_path).map_err(ApplyError::Rejected)?;
+    admit_timestamp(repo_root, &path, Utc::now()).map_err(rejected)?;
+    let commit = git.added_in(repo_path).map_err(rejected)?;
+    let receipt = apply_request(&request, writer, archives, &commit, run)?;
+    write_receipt(repo_root, &path, &receipt).map_err(rejected)?;
+    let receipt_path = path.receipt_path().to_string_lossy().replace('\\', "/");
+    git.commit_and_push(&receipt_path, &format!("chore(apply): record {repo_path}"))
+        .map_err(rejected)
+}
+
+fn rejected(error: impl fmt::Display) -> ApplyError {
+    ApplyError::Rejected(vec![error.to_string()])
+}
 
 pub fn apply_request(
     request: &Request,

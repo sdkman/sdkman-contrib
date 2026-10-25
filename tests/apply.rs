@@ -4,13 +4,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
-use sdkman_contrib::apply::{ApplyError, RunInfo, apply_request};
-use sdkman_contrib::receipt::{ReceiptRow, StableTag};
+use sdkman_contrib::apply::{ApplyError, RunInfo, apply_queue, apply_request};
+use sdkman_contrib::git::Git;
+use sdkman_contrib::receipt::{Receipt, ReceiptRow, StableTag};
 use sdkman_contrib::request::{Archive, Registration, Release, ReleaseVersion, Request};
 use sdkman_contrib::state_api::WriteError;
 use sha2::{Digest, Sha256};
 use support::archives::write_tar_gz;
 use support::fakes::{FakeArchives, FakeWriter};
+use support::repo::TempRepo;
 use tempfile::TempDir;
 
 const COMMIT: &str = "9e07d13";
@@ -297,4 +299,186 @@ fn run_info_reads_the_github_run_url() {
 #[test]
 fn run_info_without_github_vars_is_local() {
     assert_eq!(run().run_url, "local");
+}
+
+const JPX_REGISTER: &str = "requests/jpx/20261008T140211Z-register-jpx.yaml";
+const TOMCAT_RELEASE: &str = "requests/tomcat/20261009T081500Z-release-11.0.15.yaml";
+const JPX_RELEASE: &str = "requests/jpx/20261008T100000Z-release-1.0.0.yaml";
+
+const REGISTER_YAML: &str = "candidate: jpx
+register:
+  name: JPX
+  description: A tool.
+  website: https://jpx.dev/
+";
+
+fn tomcat_release_yaml() -> String {
+    "candidate: tomcat
+versions:
+  - version: 11.0.15
+    platforms:
+      LINUX_X64: https://dl.example/tomcat-11.0.15.tar.gz
+"
+    .to_owned()
+}
+
+fn jpx_release_yaml(versions: &[&str]) -> String {
+    let rows: String = versions
+        .iter()
+        .map(|version| {
+            format!(
+                "  - version: {version}\n    platforms:\n      LINUX_X64: {}\n",
+                url(version)
+            )
+        })
+        .collect();
+    format!("candidate: jpx\nversions:\n{rows}")
+}
+
+fn queue_repo(requests: &[(&str, String)]) -> (TempRepo, Vec<String>) {
+    let repo = TempRepo::with_remote();
+    repo.write("contrib-candidates.txt", "jpx\ntomcat\n");
+    let commits = requests
+        .iter()
+        .map(|(path, text)| {
+            repo.write(path, text);
+            repo.commit_all(&format!("add {path}"))
+        })
+        .collect();
+    (repo, commits)
+}
+
+fn tomcat_archives(dir: &TempDir) -> FakeArchives {
+    FakeArchives::default().serving(
+        "https://dl.example/tomcat-11.0.15.tar.gz",
+        &tar_gz(
+            dir,
+            "tomcat.tar.gz",
+            &[
+                ("tomcat-11.0.15/", 0o755),
+                ("tomcat-11.0.15/bin/", 0o755),
+                ("tomcat-11.0.15/bin/catalina.sh", 0o755),
+            ],
+        ),
+    )
+}
+
+fn read_receipt(repo: &TempRepo, request: &str) -> Receipt {
+    let text = std::fs::read_to_string(repo.path().join(request.replace("requests/", ".applied/")))
+        .unwrap();
+    serde_norway::from_str(&text).unwrap()
+}
+
+fn has_receipt(repo: &TempRepo, request: &str) -> bool {
+    repo.path()
+        .join(request.replace("requests/", ".applied/"))
+        .exists()
+}
+
+#[test]
+fn applies_in_file_name_order_across_candidates() {
+    let dir = TempDir::new().unwrap();
+    let (repo, commits) = queue_repo(&[
+        (TOMCAT_RELEASE, tomcat_release_yaml()),
+        (JPX_REGISTER, REGISTER_YAML.to_owned()),
+    ]);
+    let writer = FakeWriter::default();
+
+    let applied = apply_queue(
+        repo.path(),
+        &writer,
+        &tomcat_archives(&dir),
+        &Git::new(repo.path()),
+        &run(),
+    )
+    .unwrap();
+
+    assert_eq!(applied, vec![JPX_REGISTER, TOMCAT_RELEASE]);
+    assert_eq!(writer.candidates().len(), 1);
+    assert_eq!(writer.rows().len(), 1);
+    assert!(commits[1].starts_with(&read_receipt(&repo, JPX_REGISTER).commit));
+    assert!(commits[0].starts_with(&read_receipt(&repo, TOMCAT_RELEASE).commit));
+    assert!(repo.remote_log().starts_with(&format!(
+        "chore(apply): record {TOMCAT_RELEASE}\nchore(apply): record {JPX_REGISTER}\n"
+    )));
+}
+
+#[test]
+fn failure_blocks_later_requests() {
+    let dir = TempDir::new().unwrap();
+    let (repo, _) = queue_repo(&[
+        (JPX_RELEASE, jpx_release_yaml(&["1.0.0"])),
+        (TOMCAT_RELEASE, tomcat_release_yaml()),
+    ]);
+    let writer = FakeWriter::default();
+    let git = Git::new(repo.path());
+
+    let error =
+        apply_queue(repo.path(), &writer, &tomcat_archives(&dir), &git, &run()).unwrap_err();
+
+    assert!(error.to_string().starts_with(JPX_RELEASE), "{error}");
+    assert_eq!(writer.write_attempts(), 0);
+    assert!(!has_receipt(&repo, JPX_RELEASE));
+    assert!(!has_receipt(&repo, TOMCAT_RELEASE));
+
+    let archives = good_archives(&dir, &["1.0.0"]);
+    let archives = archives.serving(
+        "https://dl.example/tomcat-11.0.15.tar.gz",
+        &dir.path().join("tomcat.tar.gz"),
+    );
+    let applied = apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap();
+    assert_eq!(applied, vec![JPX_RELEASE, TOMCAT_RELEASE]);
+}
+
+#[test]
+fn half_applied_release_reapplies_once() {
+    let dir = TempDir::new().unwrap();
+    let (repo, _) = queue_repo(&[(JPX_RELEASE, jpx_release_yaml(&["1.0.0", "1.1.0"]))]);
+    let archives = good_archives(&dir, &["1.0.0", "1.1.0"]);
+    let writer = FakeWriter::failing_on("1.1.0", "LINUX_X64");
+    let git = Git::new(repo.path());
+
+    apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap_err();
+    assert_eq!(writer.rows().len(), 1);
+    assert!(!has_receipt(&repo, JPX_RELEASE));
+
+    writer.stop_failing();
+    let applied = apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap();
+
+    assert_eq!(applied, vec![JPX_RELEASE]);
+    assert_eq!(writer.rows().len(), 2);
+    assert_eq!(read_receipt(&repo, JPX_RELEASE).rows.unwrap().len(), 2);
+    assert_eq!(repo.remote_log().matches("chore(apply): record").count(), 1);
+}
+
+#[test]
+fn backdated_pending_request_fails_apply() {
+    let dir = TempDir::new().unwrap();
+    let backdated = "requests/jpx/20261001T000000Z-release-1.0.0.yaml";
+    let (repo, _) = queue_repo(&[(backdated, jpx_release_yaml(&["1.0.0"]))]);
+    repo.write(
+        ".applied/jpx/20261014T094057Z-register-jpx.yaml",
+        "applied_at: 2026-10-14T09:40:57Z\ncommit: 9e07d13\nrun: local\n",
+    );
+    repo.commit_all("receipt");
+    let writer = FakeWriter::default();
+
+    let error = apply_queue(
+        repo.path(),
+        &writer,
+        &good_archives(&dir, &["1.0.0"]),
+        &Git::new(repo.path()),
+        &run(),
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().starts_with(backdated), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("is earlier than the latest applied request"),
+        "{error}"
+    );
+    assert_eq!(writer.write_attempts(), 0);
+    assert!(!has_receipt(&repo, backdated));
 }
