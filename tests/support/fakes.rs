@@ -201,7 +201,7 @@ impl StateWriter for FakeWriter {
     }
 }
 
-/// Answers every lookup with its scripted result, and counts the lookups.
+/// Answers every lookup with its scripted result, and records the commit of each lookup.
 pub struct FakeDigests {
     answer: Result<CheckDigests, DigestError>,
     lookups: RefCell<Vec<String>>,
