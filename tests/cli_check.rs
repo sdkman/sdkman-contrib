@@ -155,3 +155,69 @@ fn base_accepts_the_matching_file() {
         .assert()
         .success();
 }
+
+#[test]
+fn digests_file_names_the_request() {
+    let repo = repo_with_registration();
+    let state = FakeState::answering(&[(204, "")]);
+    contrib(&repo, &state)
+        .args(["check", REGISTRATION_PATH, "--digests", "digests.json"])
+        .assert()
+        .success();
+    let digests: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(repo.path().join("digests.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        digests,
+        serde_json::json!({ "request": REGISTRATION_PATH, "rows": [] })
+    );
+}
+
+#[test]
+fn digests_file_is_written_on_fail() {
+    let repo = repo_with_registration();
+    let state = FakeState::answering(&[]);
+    contrib(&repo, &state)
+        .args([
+            "check",
+            "requests/jpx/jpx.yaml",
+            "--digests",
+            "digests.json",
+        ])
+        .assert()
+        .code(1);
+    assert!(repo.path().join("digests.json").exists());
+}
+
+#[test]
+fn unwritable_digests_path_exits_1() {
+    let repo = repo_with_registration();
+    let state = FakeState::answering(&[(204, "")]);
+    contrib(&repo, &state)
+        .args([
+            "check",
+            REGISTRATION_PATH,
+            "--digests",
+            "missing/digests.json",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "cannot write missing/digests.json",
+        ));
+}
+
+#[test]
+fn no_digests_without_a_selected_request() {
+    let repo = TempRepo::new();
+    repo.write("contrib-candidates.txt", "jpx\n");
+    let base = repo.commit_all("base");
+    repo.write("README.md", "hello\n");
+    repo.commit_all("edit readme");
+    let state = FakeState::answering(&[]);
+    contrib(&repo, &state)
+        .args(["check", "--base", &base, "--digests", "digests.json"])
+        .assert()
+        .code(1);
+    assert!(!repo.path().join("digests.json").exists());
+}
