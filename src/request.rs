@@ -1,12 +1,13 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::Deserialize;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 
-use crate::request_path::Kind;
+use crate::request_path::{Kind, RequestPath};
 
 const ARCHIVE_KEYS: &[&str] = &["url", "md5", "sha256", "sha512"];
+const UNIVERSAL: &str = "UNIVERSAL";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestError {
@@ -182,6 +183,56 @@ impl Request {
             Request::Registration(_) => Kind::Register,
             Request::Release(_) => Kind::Release,
         }
+    }
+
+    pub fn mismatches(&self, path: &RequestPath) -> Vec<String> {
+        let mut mismatches = Vec::new();
+        if path.candidate() != self.candidate() {
+            mismatches.push(format!(
+                "directory `{}` does not match candidate `{}`",
+                path.candidate(),
+                self.candidate()
+            ));
+        }
+        if path.kind() != self.kind() {
+            mismatches.push(format!(
+                "file name says `{}` but the content is a `{}`",
+                path.kind().as_str(),
+                self.kind().as_str()
+            ));
+        }
+        mismatches
+    }
+}
+
+impl Release {
+    pub fn structure_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        if self.versions.is_empty() {
+            errors.push("a release needs at least one version".to_string());
+        }
+        let mut seen = BTreeSet::new();
+        for entry in &self.versions {
+            let version = &entry.version;
+            if !seen.insert(version.as_str()) {
+                errors.push(format!("version `{version}` is repeated"));
+            }
+            if entry.platforms.is_empty() {
+                errors.push(format!("version `{version}` has no platforms"));
+            } else if entry.platforms.len() > 1 && entry.platforms.contains_key(UNIVERSAL) {
+                errors.push(format!(
+                    "version `{version}`: {UNIVERSAL} excludes every other platform"
+                ));
+            }
+        }
+        if let Some(default) = &self.default
+            && !seen.contains(default.as_str())
+        {
+            errors.push(format!(
+                "default {default} is not a version in this request"
+            ));
+        }
+        errors
     }
 }
 
@@ -387,5 +438,82 @@ default: 1.2.0
         let empty_platforms =
             release("candidate: jpx\nversions:\n  - version: 1.0\n    platforms: {}\n");
         assert!(empty_platforms.versions[0].platforms.is_empty());
+    }
+
+    fn path(text: &str) -> RequestPath {
+        RequestPath::parse(text).unwrap()
+    }
+
+    const RELEASE_PATH: &str = "requests/jpx/20261008T101500Z-release-1.2.0.yaml";
+
+    #[test]
+    fn accepts_matching_path_and_content() {
+        let request = parse_request(RELEASE).unwrap();
+        assert!(request.mismatches(&path(RELEASE_PATH)).is_empty());
+        assert!(release(RELEASE).structure_errors().is_empty());
+    }
+
+    #[test]
+    fn rejects_directory_mismatch() {
+        let request = parse_request(RELEASE).unwrap();
+        let mismatches =
+            request.mismatches(&path("requests/other/20261008T101500Z-release-1.2.0.yaml"));
+        assert_eq!(mismatches.len(), 1);
+        assert!(mismatches[0].contains("other") && mismatches[0].contains("jpx"));
+    }
+
+    #[test]
+    fn rejects_kind_mismatch() {
+        let request = parse_request(REGISTRATION).unwrap();
+        let mismatches = request.mismatches(&path(RELEASE_PATH));
+        assert_eq!(mismatches.len(), 1);
+        assert!(mismatches[0].contains("release") && mismatches[0].contains("register"));
+    }
+
+    #[test]
+    fn rejects_empty_versions_and_platforms() {
+        let none = release("candidate: jpx\nversions: []\n").structure_errors();
+        assert_eq!(none, vec!["a release needs at least one version"]);
+        let empty = release("candidate: jpx\nversions:\n  - version: 1.0\n    platforms: {}\n")
+            .structure_errors();
+        assert_eq!(empty, vec!["version `1.0` has no platforms"]);
+    }
+
+    #[test]
+    fn rejects_repeated_version() {
+        let text = format!(
+            "{}  - version: 1.2.0\n    platforms:\n      UNIVERSAL: https://x.dev/a.zip\n",
+            RELEASE.replace("default: 1.2.0\n", "")
+        );
+        assert_eq!(
+            release(&text).structure_errors(),
+            vec!["version `1.2.0` is repeated"]
+        );
+    }
+
+    #[test]
+    fn rejects_universal_mix() {
+        let text = RELEASE.replace(
+            "      LINUX_X64:",
+            "      UNIVERSAL: https://downloads.jpx.dev/1.2.0/jpx-1.2.0.zip\n      LINUX_X64:",
+        );
+        let errors = release(&text).structure_errors();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("UNIVERSAL excludes every other platform"));
+    }
+
+    #[test]
+    fn accepts_lone_universal() {
+        let text = "candidate: jpx\nversions:\n  - version: 1.0\n    platforms:\n      UNIVERSAL: https://x.dev/a.zip\n";
+        assert!(release(text).structure_errors().is_empty());
+    }
+
+    #[test]
+    fn rejects_foreign_default() {
+        let text = RELEASE.replace("default: 1.2.0", "default: 9.9.9");
+        assert_eq!(
+            release(&text).structure_errors(),
+            vec!["default 9.9.9 is not a version in this request"]
+        );
     }
 }
