@@ -90,4 +90,10 @@ mod tests {
         let listing = CandidateListing::load(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         assert!(!listing.candidates.contains("java"));
     }
+
+    #[test]
+    fn committed_listing_never_lists_contrib() {
+        let listing = CandidateListing::load(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+        assert!(!listing.candidates.contains("contrib"));
+    }
 }
