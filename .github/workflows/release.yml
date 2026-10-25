@@ -109,7 +109,7 @@ jobs:
           cp "target/$TARGET/release/contrib.exe" "contrib-$VERSION/bin/contrib.exe"
           7z a "dist/contrib-$VERSION-$SUFFIX" "contrib-$VERSION"
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: contrib-${{ matrix.platform }}
           path: dist/contrib-*
