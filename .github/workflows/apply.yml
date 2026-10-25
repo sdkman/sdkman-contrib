@@ -1,0 +1,69 @@
+name: Apply
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - ".applied/**"
+  workflow_dispatch:
+    inputs:
+      void:
+        description: "Pending request path to void instead of applying"
+        required: false
+        type: string
+      reason:
+        description: "Why the request is voided"
+        required: false
+        type: string
+
+concurrency:
+  group: apply
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CONTRIB_APP_ID }}
+          private-key: ${{ secrets.CONTRIB_APP_PRIVATE_KEY }}
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Set git identity
+        run: |
+          git config user.name "sdkman-contrib[bot]"
+          git config user.email "sdkman-contrib[bot]@users.noreply.github.com"
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
+      - name: Build
+        run: cargo build --release --locked
+      - name: Apply requests
+        env:
+          COMMUNITY_EMAIL: ${{ secrets.COMMUNITY_EMAIL }}
+          COMMUNITY_PASSWORD: ${{ secrets.COMMUNITY_PASSWORD }}
+          CONTRIB_STATE_URL: ${{ vars.CONTRIB_STATE_URL }}
+          VOID: ${{ inputs.void }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          if [ -n "$VOID" ]; then
+            ./target/release/contrib apply --void "$VOID" --reason "${REASON:-voided by $GITHUB_ACTOR}"
+          else
+            ./target/release/contrib apply
+          fi
