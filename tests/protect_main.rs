@@ -29,6 +29,10 @@ fn committed() -> Value {
                 "type": "pull_request",
                 "parameters": { "required_approving_review_count": 1 }
             },
+            {
+                "type": "required_status_checks",
+                "parameters": { "required_status_checks": [{ "context": "pull-request" }] }
+            },
             { "type": "non_fast_forward" }
         ],
         "bypass_actors": [
@@ -211,6 +215,31 @@ fn check_ignores_a_parameter_the_committed_rule_lacks() {
     sandbox.live_ruleset(&live);
 
     sandbox.run(&["--check"]).success();
+}
+
+#[test]
+fn check_ignores_a_nested_parameter_the_committed_rule_lacks() {
+    let sandbox = Sandbox::new(&committed());
+    let mut live = live_copy_of(&committed());
+    live["rules"][1]["parameters"]["required_status_checks"][0]["integration_id"] = json!(15368);
+    sandbox.live_ruleset(&live);
+
+    sandbox.run(&["--check"]).success();
+}
+
+#[test]
+fn check_fails_on_a_differing_nested_parameter() {
+    let sandbox = Sandbox::new(&committed());
+    let mut live = live_copy_of(&committed());
+    live["rules"][1]["parameters"]["required_status_checks"][0]["context"] = json!("other");
+    sandbox.live_ruleset(&live);
+
+    sandbox
+        .run(&["--check"])
+        .code(1)
+        .stderr(predicates::str::contains(
+            "main differs from the live ruleset",
+        ));
 }
 
 #[test]

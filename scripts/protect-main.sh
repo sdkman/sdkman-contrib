@@ -31,13 +31,20 @@ live_rulesets="$(gh api "$api?includes_parents=false")"
 # Keep only the parameters the committed rule names: GitHub fills in defaults for the rest.
 # shellcheck disable=SC2016 # jq variables, not shell ones
 normalise_live='
+  def prune($shape):
+    if type == "object" and ($shape | type) == "object" then
+      with_entries(.key as $key | select($shape | has($key)) | .value |= prune($shape[$key]))
+    elif type == "array" and ($shape | type) == "array" then
+      [keys[] as $index | .[$index] | prune($shape[$index])]
+    else .
+    end;
   .rules |= map(
       . as $rule
       | ($committed.rules | map(select(.type == $rule.type)) | first) as $match
       | if $match == null then .
         elif $match.parameters == null then del(.parameters)
         elif ($rule.parameters | type) == "object" then
-          .parameters |= with_entries(select(.key as $key | $match.parameters | has($key)))
+          .parameters |= prune($match.parameters)
         else .
         end)'
 shape='{enforcement, conditions, rules: (.rules | sort_by(.type)), bypass_actors: (.bypass_actors | sort_by(.actor_id, .actor_type))}'
