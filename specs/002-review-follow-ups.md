@@ -24,10 +24,13 @@ Rust toolchain, no clone of the repo and no prior knowledge of GitHub releases.
 **Every release of `contrib` reaches SDKMAN on its own.** A maintainer cuts a release with
 `cargo release` on `main`. It sets the `version` in `Cargo.toml`, commits, tags the commit
 `v<version>` and pushes, and the tag push publishes it as a new `contrib` version in State, for
-every platform above, and makes it the default. Only maintainers may create `v*` tags, a tag
-ruleset enforces that, and the `Release` workflow fails before publishing unless the tagged
-commit is on `main`. The vendor credential lives in a GitHub environment that only `v*` tags
-can deploy from. It is published as a vendor publishes its own candidate, through State's
+every platform above, and makes it the default. *(Assumption, planning pass 2026-10-25:
+`main`'s ruleset refuses a direct push, a maintainer's included, so the version bump lands
+through a PR. On the merged commit a maintainer runs `cargo release tag` and
+`cargo release push`, which tag it `v<version>` and push only the tag.)* Only maintainers may
+create `v*` tags, a tag ruleset enforces that, and the `Release` workflow fails before
+publishing unless the tagged commit is on `main`. The vendor credential lives in a GitHub
+environment that only `v*` tags can deploy from. It is published as a vendor publishes its own candidate, through State's
 vendor role, never through a `contrib` request. So `contrib` is never listed in
 `contrib-candidates.txt`, and a broken `contrib` can never block its own fix. Each published
 archive is well formed by SDKMAN's own rules: one `contrib-<version>` base directory holding
@@ -86,7 +89,11 @@ commit, reads the PR head only as data, and posts its verdict as the commit stat
 `.applied/`. The ruleset requires that status, and a fork PR's read-only token cannot post
 it. Code PRs keep a separate `pull_request` job for build and tests. Check Report and the
 failure alert accept the new event. This amends 001's "Both run under the one
-`Pull Requests` workflow".
+`Pull Requests` workflow". *(Assumption, planning pass 2026-10-25: the `pull_request_target`
+job runs in its own `Request Check` workflow. One workflow serving both events would report
+each run's other job as skipped, and GitHub counts a skipped job as passing a required
+check. Fork-PR triage, which follows `Pull Requests`, also stays at one notification per
+PR.)*
 
 **What is applied is what was reviewed.** The archive the apply downloads must be the same
 archive the check downloaded for the reviewed PR, byte for byte, whether or not the contributor
@@ -97,6 +104,11 @@ requests of other candidates. A later request for that candidate never lands bef
 blocked one, so a default can never move out of order. The blocked request and the
 requests skipped behind it stay pending until a maintainer voids it. Each run that meets a
 blocked request fails, so the failure alert fires on every run until it is voided.
+*(Assumption, planning pass 2026-10-25: an archive the apply cannot download has not changed.
+That failure keeps 001's rule: the run stops there, and the next run retries it.)*
+*(Assumption, planning pass 2026-10-25: the apply compares digests before it re-runs the
+archive rules and the declared checksums. An archive replaced by one that also breaks a rule
+has changed, so it blocks its candidate rather than stopping the run.)*
 
 The check writes each row's computed sha256 to a `digests.json` artifact of its run. Only
 the trusted `pull_request_target` check run produces digests the apply accepts; an artifact
@@ -107,7 +119,12 @@ has to be voided and requested again. The
 apply reads that artifact, through the Actions API with `actions: read`, from the last
 successful check run on the PR head commit that merged. A missing artifact counts as a
 mismatch. This amends 001's "The apply trusts nothing from the PR run" for these digests
-only.
+only. *(Assumption, planning pass 2026-10-25: the repository is public from launch, and
+GitHub caps a public repository's artifact retention at 90 days, so the check keeps its
+artifact for 90 days.)* *(Assumption, planning pass 2026-10-25: a lookup that fails in
+transport, or that the Actions API answers with an unexpected status, has not found the
+artifact missing. That failure keeps 001's rule: the run stops there, and the next run
+retries it.)*
 
 **A default that will not move is flagged.** A release whose `default` version has neither a
 `UNIVERSAL` nor a `LINUX_X64` row gets a `WARN`. The WARN says the default will not move, and
@@ -116,13 +133,26 @@ candidate whose default is a `UNIVERSAL` version with no default at all.
 
 **The committed ruleset is the live ruleset.** `.github/rulesets/main.json` describes `main`'s
 protection as it is actually applied, including the GitHub App that may bypass it. It holds no
-placeholder that has to be filled in elsewhere.
+placeholder that has to be filled in elsewhere. *(Assumption, planning pass 2026-10-25: the App
+does not exist yet, so its id cannot be committed. Until a maintainer commits it, `main.json`
+names the App with `actor_id` 0, and `scripts/protect-main.sh` refuses to apply or check while
+any ruleset does.)* *(Assumption, planning pass 2026-10-25: the `v*` tag ruleset is committed
+beside it as `release-tags.json`, and the same script applies and checks both. Its bypass
+actors are the repository's Maintain and Admin roles.)* *(Assumption, planning pass 2026-10-25:
+`--check` also compares each ruleset's `enforcement`, because a ruleset switched off in the
+settings protects nothing.)* *(Assumption, planning pass 2026-10-25: GitHub answers a rule's
+parameters with defaults for those a ruleset left out, such as a pull request rule's allowed
+merge methods. So `--check` compares only the parameters the committed file names, and a ruleset
+it has just applied checks clean.)*
 
 ## Business Rules
 
 1. **Every contributor platform is covered.** Linux x64, Linux ARM64, macOS x64, macOS ARM64
    and Windows x64 each get a `contrib` version in State and a binary on GitHub with every
-   release. A platform without one is not listed as supported.
+   release. A platform without one is not listed as supported. *(Assumption, planning pass
+   2026-10-25: the Linux binaries link musl statically, so they run on any glibc.)*
+   *(Assumption, planning pass 2026-10-25: the Windows binary links its C runtime statically,
+   so it runs without the Visual C++ redistributable.)*
 2. **Install steps are verifiable.** The README shows how to confirm the install worked, by
    running `contrib --version`, which prints `contrib <version>`. `<version>` is the `version`
    in `Cargo.toml`, and the release reads it from there: the tag is `v<version>`, and the
@@ -133,6 +163,13 @@ placeholder that has to be filled in elsewhere.
    without tags, then tags them `stable`, with `LINUX_X64` last. If any step fails before that
    last tag, the workflow deletes the rows it posted for that version (the vendor role may
    delete its own candidate's versions) and fails. The default moves only with the last tag.
+   *(Assumption, planning pass 2026-10-25: State refuses to delete a row that holds a tag. So
+   the rollback first moves each `stable` it moved back to the version that held it, or
+   removes it where none did. It deletes only rows that did not exist before the run, so
+   re-running a published release never deletes it.)* *(Assumption, planning pass 2026-10-25:
+   State's reads are cached at the edge for up to ten minutes, so the publish reads past that
+   cache. A stale answer would restore the wrong version, or delete a row that existed before
+   the run.)*
 5. **Redirect chains stay on `https`.** A chain with any non-`https` hop fails the URL rule.
    A chain that never ends in a `200` fails it too, as does one with more than 5 redirects. A
    written URL whose path contains `/releases/latest/` fails the URL rule. The written URL
@@ -145,7 +182,8 @@ placeholder that has to be filled in elsewhere.
 8. **The check runs trusted code.** No file added or changed by a PR is executed or built,
    and no workflow, build or tool configuration from the PR is used, while checking that PR's
    request. The check reads the PR only as data: its change set and the one request file it
-   adds.
+   adds. *(Assumption, planning pass 2026-10-25: a request file that is a symbolic link fails
+   the check unread. Following it would read a file outside the PR into a public report.)*
 9. **A changed archive blocks its request.** A mismatch between the archive seen at check
    time and at apply time fails the apply for that request before anything for it is written.
 10. **An unreachable default only warns.** It never fails the check, because State, not this
