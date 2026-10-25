@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::path::PathBuf;
 
-use chrono::{NaiveDateTime, Timelike};
+use chrono::{DateTime, NaiveDateTime, Timelike, Utc};
 
 const TIMESTAMP_FORMAT: &str = "%Y%m%dT%H%M%SZ";
 const TIMESTAMP_LEN: usize = 16;
@@ -192,6 +192,22 @@ fn is_slug_char(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-'
 }
 
+pub fn check_timestamp(
+    timestamp: &Timestamp,
+    now: DateTime<Utc>,
+    latest_applied: Option<&Timestamp>,
+) -> Result<(), String> {
+    if timestamp.at() > now.naive_utc() {
+        return Err(format!("timestamp {timestamp} is in the future"));
+    }
+    match latest_applied {
+        Some(latest) if timestamp < latest => Err(format!(
+            "timestamp {timestamp} is earlier than the latest applied request {latest}"
+        )),
+        _ => Ok(()),
+    }
+}
+
 pub fn slugify(text: &str) -> String {
     text.to_lowercase()
         .chars()
@@ -316,5 +332,43 @@ mod tests {
     fn slugify_lowercases_and_replaces_other_characters() {
         assert_eq!(slugify("1.2.0-RC_1+build"), "1.2.0-rc-1-build");
         assert_eq!(slugify("JPX"), "jpx");
+    }
+
+    fn now() -> DateTime<Utc> {
+        Timestamp::parse("20261010T120000Z").unwrap().at().and_utc()
+    }
+
+    fn timestamp(text: &str) -> Timestamp {
+        Timestamp::parse(text).unwrap()
+    }
+
+    #[test]
+    fn rejects_future_timestamp() {
+        let error = check_timestamp(&timestamp("20261010T120001Z"), now(), None).unwrap_err();
+        assert_eq!(error, "timestamp 20261010T120001Z is in the future");
+    }
+
+    #[test]
+    fn rejects_backdated_timestamp() {
+        let latest = timestamp("20261009T081500Z");
+        let error =
+            check_timestamp(&timestamp("20261009T081459Z"), now(), Some(&latest)).unwrap_err();
+        assert_eq!(
+            error,
+            "timestamp 20261009T081459Z is earlier than the latest applied request 20261009T081500Z"
+        );
+    }
+
+    #[test]
+    fn accepts_equal_timestamp() {
+        let latest = timestamp("20261009T081500Z");
+        assert!(check_timestamp(&latest, now(), Some(&latest)).is_ok());
+    }
+
+    #[test]
+    fn accepts_timestamp_equal_to_now_and_later_than_latest() {
+        let latest = timestamp("20261009T081500Z");
+        assert!(check_timestamp(&timestamp("20261010T120000Z"), now(), Some(&latest)).is_ok());
+        assert!(check_timestamp(&timestamp("20261010T120000Z"), now(), None).is_ok());
     }
 }
