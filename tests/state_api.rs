@@ -301,6 +301,21 @@ fn stable_version_reads_the_tag_route() {
 }
 
 #[test]
+fn stable_version_refuses_a_200_without_a_version() {
+    let state = FakeState::answering(&[(200, "{}")]);
+    let error = HttpState::new(&state.url)
+        .stable_version("contrib", "LINUX_X64")
+        .unwrap_err();
+    assert_eq!(
+        error,
+        WriteError::Refused {
+            status: 200,
+            messages: vec!["State answered 200".to_owned()]
+        }
+    );
+}
+
+#[test]
 fn has_version_reads_the_version_route() {
     let state = FakeState::answering(&[(200, "{}"), (404, ""), (500, "")]);
     let reader = HttpState::new(&state.url);
@@ -352,6 +367,21 @@ fn tag_stable_posts_the_tag() {
     assert_eq!(
         posted,
         json!({"candidate": "contrib", "version": "0.2.0", "platform": "LINUX_X64", "tag": "stable"})
+    );
+}
+
+#[test]
+fn tag_stable_refuses_anything_but_204() {
+    let state = FakeState::answering(&[TOKEN_ONE, (200, "")]);
+    let error = community(&state.url)
+        .tag_stable("contrib", "0.2.0", "LINUX_X64")
+        .unwrap_err();
+    assert_eq!(
+        error,
+        WriteError::Refused {
+            status: 200,
+            messages: vec!["State answered 200".to_owned()]
+        }
     );
 }
 
