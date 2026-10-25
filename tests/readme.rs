@@ -81,3 +81,43 @@ fn readme_states_the_review_rules() {
     assert!(section("The check on your PR").contains("never code from your PR"));
     assert!(!readme.contains("only thing that pins"));
 }
+
+#[test]
+fn readme_names_the_install_path() {
+    let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+        .expect("README.md is readable");
+
+    let install = readme
+        .split("\n## ")
+        .find(|section| section.starts_with("Installing contrib"))
+        .expect("README.md has an Installing contrib section");
+
+    assert!(readme.find("## Installing contrib") < readme.find("## How it works"));
+    for literal in [
+        "sdk update",
+        "new terminal",
+        "sdk install contrib",
+        "sdk upgrade contrib",
+        "Linux x64",
+        "Linux ARM64",
+        "macOS x64",
+        "macOS ARM64",
+        "Windows x64",
+        "contrib --version",
+        "contrib <version>",
+        "GitHub release",
+        "cargo install --git https://github.com/sdkman/sdkman-contrib",
+    ] {
+        assert!(install.contains(literal), "missing {literal}");
+    }
+    assert!(!readme.contains("You never have to install it"));
+}
+
+#[test]
+fn version_prints_contrib_and_the_cargo_version() {
+    assert_cmd::Command::new(assert_cmd::cargo::cargo_bin!("contrib"))
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(format!("contrib {}\n", env!("CARGO_PKG_VERSION")));
+}

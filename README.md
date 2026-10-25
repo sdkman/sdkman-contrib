@@ -6,6 +6,23 @@ CI checks your file, downloads every archive it points at, and posts the result 
 
 This repository replaces `sdkman-db-migrations`, which was archived when Postgres became the master datastore.
 
+## Installing contrib
+
+Install `contrib` through SDKMAN. Run `sdk update`, open a new terminal, then run `sdk install contrib`. Later, `sdk upgrade contrib` moves you to a newer release.
+
+It runs on Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64.
+
+Confirm the install worked:
+
+```
+$ contrib --version
+contrib <version>
+```
+
+It prints the installed version. If you cannot use SDKMAN, download the binary for your platform from the GitHub release. If you already have a Rust toolchain, `cargo install --git https://github.com/sdkman/sdkman-contrib` builds it from source.
+
+With `contrib` installed you can write a request with `contrib new` and run `contrib check` before you push.
+
 ## How it works
 
 There are two kinds of request.
@@ -59,7 +76,7 @@ The timestamp leads, so names sort in the order they were written. Merged reques
 
 ## Writing a request with `contrib new`
 
-`contrib new` writes a correctly named skeleton with the current UTC time. You never have to install it, because a correctly named, hand-written file is just as good. Pre-built binaries are attached to each GitHub release.
+`contrib new` writes a correctly named skeleton with the current UTC time. A hand-written file that follows the naming rules stays valid.
 
 ```
 $ contrib new register jpx
