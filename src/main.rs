@@ -222,11 +222,21 @@ fn apply(args: ApplyArgs) -> ExitCode {
     let archives = HttpArchiveSource::new();
     let digests = GitHubDigests::new(&github_api_url, &repository, &github_token);
     match apply_queue(&repo_root, &state, &archives, &digests, &git, &run) {
-        Ok(applied) => {
-            for path in applied {
+        Ok(outcome) => {
+            for path in &outcome.applied {
                 println!("applied {path}");
             }
-            ExitCode::SUCCESS
+            for blocked in &outcome.blocked {
+                eprintln!("blocked {}: {}", blocked.path, blocked.reason);
+            }
+            for path in &outcome.skipped {
+                println!("skipped {path}");
+            }
+            if outcome.blocked.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         Err(error) => {
             eprintln!("{error}");

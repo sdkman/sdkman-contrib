@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 
@@ -78,6 +79,19 @@ impl fmt::Display for ApplyError {
 
 impl std::error::Error for ApplyError {}
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct QueueOutcome {
+    pub applied: Vec<String>,
+    pub blocked: Vec<BlockedRequest>,
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct BlockedRequest {
+    pub path: String,
+    pub reason: String,
+}
+
 pub fn apply_queue(
     repo_root: &Path,
     writer: &dyn StateWriter,
@@ -85,7 +99,7 @@ pub fn apply_queue(
     digests: &dyn DigestSource,
     git: &Git,
     run: &RunInfo,
-) -> Result<Vec<String>, ApplyError> {
+) -> Result<QueueOutcome, ApplyError> {
     let pending = pending_requests(repo_root).map_err(|error| ApplyError::Request {
         path: "requests".to_owned(),
         cause: Box::new(match error {
@@ -93,18 +107,32 @@ pub fn apply_queue(
             _ => failed(error),
         }),
     })?;
-    let mut applied = Vec::new();
+    let mut outcome = QueueOutcome::default();
+    let mut blocked_candidates = HashSet::new();
     for pending_path in pending {
         let repo_path = pending_path.repo_path();
-        apply_pending(repo_root, &repo_path, writer, archives, digests, git, run).map_err(
-            |cause| ApplyError::Request {
-                path: repo_path.clone(),
-                cause: Box::new(cause),
-            },
-        )?;
-        applied.push(repo_path);
+        if blocked_candidates.contains(pending_path.candidate()) {
+            outcome.skipped.push(repo_path);
+            continue;
+        }
+        match apply_pending(repo_root, &repo_path, writer, archives, digests, git, run) {
+            Ok(()) => outcome.applied.push(repo_path),
+            Err(ApplyError::Blocked(messages)) => {
+                blocked_candidates.insert(pending_path.candidate().to_owned());
+                outcome.blocked.push(BlockedRequest {
+                    path: repo_path,
+                    reason: messages.join("; "),
+                });
+            }
+            Err(cause) => {
+                return Err(ApplyError::Request {
+                    path: repo_path,
+                    cause: Box::new(cause),
+                });
+            }
+        }
     }
-    Ok(applied)
+    Ok(outcome)
 }
 
 fn apply_pending(
