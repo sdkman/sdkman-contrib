@@ -421,6 +421,47 @@ fn default_rows_validate_with_stable_tag() {
     assert_eq!(bodies[1].tags, None);
 }
 
+fn default_on_platforms(platforms: &[&str]) -> sdkman_contrib::report::Report {
+    let mut fixture = Fixture::new();
+    let mut rows = String::new();
+    for (index, platform) in platforms.iter().enumerate() {
+        let url = format!("https://downloads.jpx.dev/jpx-1.2.0-{index}.zip");
+        fixture = fixture.serving(&url, &format!("{index}.zip"), &GOOD_ENTRIES);
+        rows.push_str(&format!("      {platform}: {url}\n"));
+    }
+    let release = format!(
+        "candidate: jpx\ndefault: 1.2.0\nversions:\n  - version: 1.2.0\n    platforms:\n{rows}"
+    );
+    fixture.repo.write(RELEASE_PATH, &release);
+    fixture.check(&FakeValidator::default(), RELEASE_PATH)
+}
+
+#[test]
+fn unmovable_default_warns() {
+    let report = default_on_platforms(&["MAC_ARM64"]);
+    let text = report.render_text();
+    assert!(!report.has_failures(), "{text}");
+    let last = text.lines().last().unwrap();
+    assert!(last.starts_with("WARN  jpx 1.2.0 default"), "{text}");
+    assert!(
+        last.contains("the default will not move without a UNIVERSAL or LINUX_X64 row; State clears stable from other versions' UNIVERSAL rows, so a UNIVERSAL default is lost"),
+        "{text}"
+    );
+}
+
+#[test]
+fn movable_default_does_not_warn() {
+    for platforms in [
+        &["LINUX_X64"][..],
+        &["UNIVERSAL"],
+        &["MAC_ARM64", "LINUX_X64"],
+    ] {
+        let text = default_on_platforms(platforms).render_text();
+        assert!(!text.contains("default"), "{platforms:?}: {text}");
+        assert!(!text.contains("WARN"), "{platforms:?}: {text}");
+    }
+}
+
 const GITHUB_URL: &str = "https://github.com/jpx/jpx/releases/download/v1.2.0/jpx-1.2.0.zip";
 const CDN_URL: &str = "https://objects.githubusercontent.com/jpx-1.2.0.zip";
 

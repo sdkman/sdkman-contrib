@@ -7,7 +7,8 @@ use serde::de::{self, Deserializer, MapAccess, Visitor};
 use crate::request_path::{Kind, RequestPath};
 
 const ARCHIVE_KEYS: &[&str] = &["url", "md5", "sha256", "sha512"];
-const UNIVERSAL: &str = "UNIVERSAL";
+pub const UNIVERSAL: &str = "UNIVERSAL";
+pub const LINUX_X64: &str = "LINUX_X64";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestError {
