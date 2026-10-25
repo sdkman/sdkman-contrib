@@ -33,9 +33,11 @@ vendor role, never through a `contrib` request. So `contrib` is never listed in
 archive is well formed by SDKMAN's own rules: one `contrib-<version>` base directory holding
 `bin/contrib`. Linux and macOS archives are `.tar.gz` and Windows is `.zip`, so `sdkman-hooks`
 must serve `contrib` its tarball post-install hook on Linux and macOS before the first release.
+That hooks change is delegated to Marco and is out of scope here (see *Out of Scope*).
 
-**`contrib` is registered once, by hand, before its first release.** A State admin registers
-it with `POST /admin/candidates`:
+**`contrib` is registered once, by hand, before its first release.** Creating the candidate is
+delegated to Marco and is out of scope here (see *Out of Scope*); this repo only depends on it.
+A State admin registers it with `POST /admin/candidates`:
 
 ```json
 {
@@ -90,10 +92,18 @@ failure alert accept the new event. This amends 001's "Both run under the one
 archive the check downloaded for the reviewed PR, byte for byte, whether or not the contributor
 declared a checksum. If an archive changed between the check and the apply, that request fails,
 writes nothing to State, and stays pending for a maintainer to void. The apply records the
-failure and goes on to the requests ordered after it, so a corrected request, or one for
-another candidate, still applies.
+failure, skips every later pending request for the same candidate, and goes on to the
+requests of other candidates. A later request for that candidate never lands before the
+blocked one, so a default can never move out of order. The blocked request and the
+requests skipped behind it stay pending until a maintainer voids it. Each run that meets a
+blocked request fails, so the failure alert fires on every run until it is voided.
 
-The check writes each row's computed sha256 to a `digests.json` artifact of its run. The
+The check writes each row's computed sha256 to a `digests.json` artifact of its run. Only
+the trusted `pull_request_target` check run produces digests the apply accepts; an artifact
+from a `pull_request` run, which runs with the PR's code, is never read. The artifact is
+kept for as long as the repository's maximum artifact retention, so a request blocked in
+the queue does not lose its digests while it waits; a request whose artifact has expired
+has to be voided and requested again. The
 apply reads that artifact, through the Actions API with `actions: read`, from the last
 successful check run on the PR head commit that merged. A missing artifact counts as a
 mismatch. This amends 001's "The apply trusts nothing from the PR run" for these digests
@@ -143,6 +153,10 @@ placeholder that has to be filled in elsewhere.
 
 ## Out of Scope
 
+- The `sdkman-hooks` change that serves `contrib` its tarball post-install hook. Delegated to
+  Marco, who releases `sdkman-hooks`.
+- Creating the `contrib` candidate in State and its scoped vendor account. Delegated to Marco.
+
 - Following redirects to anything other than an `https` archive.
 - Changing what State stores for a URL.
 - Updating `contrib` automatically on a contributor's machine.
@@ -150,10 +164,9 @@ placeholder that has to be filled in elsewhere.
 
 ## Acceptance Criteria
 
-- [ ] On a SDKMAN installed before `contrib` was registered, `sdk update` followed by `sdk install contrib` installs a working `contrib` on Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64, and `sdk upgrade contrib` moves to a newer release
+- [ ] Once Marco has made the hooks change and created the candidate: on a SDKMAN installed before `contrib` was registered, `sdk update` followed by `sdk install contrib` installs a working `contrib` on Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64, and `sdk upgrade contrib` moves to a newer release
 - [ ] After that one-time setup, a `cargo release` on `main` publishes it to State through the vendor role as the new default `contrib` version for all five platforms, with no manual step
 - [ ] Every published `contrib` archive passes SDKMAN's well-formed archive rules
-- [ ] `sdk install contrib` succeeds against the live `sdkman-hooks` on all five platforms
 - [ ] `contrib` is not listed in `contrib-candidates.txt`
 - [ ] A release that fails to publish any platform leaves the previous default in place and shows as failed
 - [ ] Each release also carries a working binary per platform on GitHub
@@ -167,5 +180,7 @@ placeholder that has to be filled in elsewhere.
 - [ ] A request PR that also changes `contrib`'s code cannot make its own check pass, and still fails for touching files outside its request
 - [ ] No code from a PR is executed while checking that PR's request
 - [ ] An archive that changed between the check and the apply fails the apply for that request, nothing for it is written, and it stays pending
+- [ ] While a request is blocked, later requests for the same candidate stay pending and requests for other candidates still apply
+- [ ] The apply never reads digests from a `pull_request` run, and a missing or expired `digests.json` blocks the request
 - [ ] A release whose `default` version has neither a `UNIVERSAL` nor a `LINUX_X64` row gets a `WARN`, and the check still passes
 - [ ] `scripts/protect-main.sh` creates the `main` ruleset if it is absent and otherwise updates it with `PUT`. `scripts/protect-main.sh --check` exits non-zero when the live ruleset's `conditions`, `rules` or `bypass_actors` differ from `main.json`, and it exits zero against the live repository
