@@ -1,0 +1,76 @@
+name: Request Check
+
+on:
+  pull_request_target:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  request-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out base
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build contrib from base
+        run: cargo build --release --locked
+      - name: Check out pull request head as data
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify change set
+        id: classify
+        working-directory: pr
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          base=$(git merge-base HEAD "$GITHUB_SHA")
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if git diff --name-only "$base" HEAD | grep -qE '^(requests|\.applied)/'; then
+            echo "request=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "$PR_NUMBER" > ../pr-number
+          echo "$HEAD_SHA" > ../head-sha
+      - name: Check request
+        id: check
+        if: steps.classify.outputs.request == 'true'
+        working-directory: pr
+        env:
+          BASE: ${{ steps.classify.outputs.base }}
+        run: ../target/release/contrib check --base "$BASE" --report ../report.md --digests ../digests.json
+      - name: Publish check report
+        if: always() && steps.classify.outputs.request == 'true'
+        run: |
+          if [ -f report.md ]; then
+            cat report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload check report
+        if: always() && steps.classify.outputs.request == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-report
+          path: |
+            report.md
+            pr-number
+            head-sha
+          if-no-files-found: ignore
+      - name: Upload digests
+        if: steps.check.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: digests.json
+          retention-days: 90
+          if-no-files-found: error
