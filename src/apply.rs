@@ -4,6 +4,7 @@ use std::path::Path;
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::check::admit_timestamp;
+use crate::check_digests::{DigestError, DigestSource};
 use crate::fetch::ArchiveSource;
 use crate::git::Git;
 use crate::load::load_request;
@@ -52,6 +53,7 @@ impl RunInfo {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApplyError {
     Rejected(Vec<String>),
+    Blocked(Vec<String>),
     Failed(String),
     Write {
         subject: String,
@@ -66,7 +68,7 @@ pub enum ApplyError {
 impl fmt::Display for ApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Rejected(messages) => f.write_str(&messages.join("; ")),
+            Self::Rejected(messages) | Self::Blocked(messages) => f.write_str(&messages.join("; ")),
             Self::Failed(message) => f.write_str(message),
             Self::Write { subject, error } => write!(f, "{subject}: {error}"),
             Self::Request { path, cause } => write!(f, "{path}: {cause}"),
@@ -80,6 +82,7 @@ pub fn apply_queue(
     repo_root: &Path,
     writer: &dyn StateWriter,
     archives: &dyn ArchiveSource,
+    digests: &dyn DigestSource,
     git: &Git,
     run: &RunInfo,
 ) -> Result<Vec<String>, ApplyError> {
@@ -93,12 +96,12 @@ pub fn apply_queue(
     let mut applied = Vec::new();
     for pending_path in pending {
         let repo_path = pending_path.repo_path();
-        apply_pending(repo_root, &repo_path, writer, archives, git, run).map_err(|cause| {
-            ApplyError::Request {
+        apply_pending(repo_root, &repo_path, writer, archives, digests, git, run).map_err(
+            |cause| ApplyError::Request {
                 path: repo_path.clone(),
                 cause: Box::new(cause),
-            }
-        })?;
+            },
+        )?;
         applied.push(repo_path);
     }
     Ok(applied)
@@ -109,13 +112,25 @@ fn apply_pending(
     repo_path: &str,
     writer: &dyn StateWriter,
     archives: &dyn ArchiveSource,
+    digests: &dyn DigestSource,
     git: &Git,
     run: &RunInfo,
 ) -> Result<(), ApplyError> {
     let (path, request) = load_request(repo_root, repo_path).map_err(ApplyError::Rejected)?;
     admit_timestamp(repo_root, &path, Utc::now()).map_err(rejected)?;
     let commit = git.added_in(repo_path).map_err(failed)?;
-    let receipt = apply_request(&request, writer, archives, &commit, run)?;
+    let merge_commit = git.added_in_full(repo_path).map_err(failed)?;
+    let receipt = apply_request(
+        &request,
+        writer,
+        archives,
+        digests,
+        Commits {
+            receipt: &commit,
+            merge: &merge_commit,
+        },
+        run,
+    )?;
     record_receipt(repo_root, git, &path, &receipt, "record")
 }
 
@@ -189,17 +204,25 @@ fn rejected(error: impl fmt::Display) -> ApplyError {
     ApplyError::Rejected(vec![error.to_string()])
 }
 
+pub struct Commits<'a> {
+    pub receipt: &'a str,
+    pub merge: &'a str,
+}
+
 pub fn apply_request(
     request: &Request,
     writer: &dyn StateWriter,
     archives: &dyn ArchiveSource,
-    commit: &str,
+    digests: &dyn DigestSource,
+    commits: Commits,
     run: &RunInfo,
 ) -> Result<Receipt, ApplyError> {
-    let receipt = blank_receipt(run, commit);
+    let receipt = blank_receipt(run, commits.receipt);
     match request {
         Request::Registration(registration) => apply_registration(registration, writer, receipt),
-        Request::Release(release) => apply_release(release, writer, archives, receipt),
+        Request::Release(release) => {
+            apply_release(release, writer, archives, digests, commits.merge, receipt)
+        }
     }
 }
 
@@ -228,6 +251,8 @@ fn apply_release(
     release: &Release,
     writer: &dyn StateWriter,
     archives: &dyn ArchiveSource,
+    digests: &dyn DigestSource,
+    merge_commit: &str,
     receipt: Receipt,
 ) -> Result<Receipt, ApplyError> {
     let checks = verify_release(release, archives);
@@ -256,6 +281,12 @@ fn apply_release(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    digests
+        .reviewed_digests(merge_commit)
+        .map_err(|error| match error {
+            DigestError::Missing => ApplyError::Blocked(vec![error.to_string()]),
+            DigestError::Failed(message) => ApplyError::Failed(message),
+        })?;
     for body in &bodies {
         writer
             .post_version(body)

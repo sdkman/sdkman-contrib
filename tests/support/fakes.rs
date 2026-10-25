@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
+use sdkman_contrib::check_digests::{CheckDigests, DigestError, DigestRow, DigestSource};
 use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError, Hop, HttpGet, follow_redirects};
 use sdkman_contrib::state_api::{Answer, StateValidator, StateWriter, WriteError};
 use sdkman_contrib::state_body::{CandidateBody, VersionBody};
@@ -197,5 +198,46 @@ impl StateWriter for FakeWriter {
         }
         self.rows.borrow_mut().insert(key, body.clone());
         Ok(())
+    }
+}
+
+/// Answers every lookup with its scripted result, and counts the lookups.
+pub struct FakeDigests {
+    answer: Result<CheckDigests, DigestError>,
+    lookups: RefCell<Vec<String>>,
+}
+
+impl FakeDigests {
+    pub fn with_rows(rows: Vec<DigestRow>) -> Self {
+        Self::answering(Ok(CheckDigests {
+            request: "requests/jpx/reviewed.yaml".to_owned(),
+            rows,
+        }))
+    }
+
+    pub fn missing() -> Self {
+        Self::answering(Err(DigestError::Missing))
+    }
+
+    pub fn failing(message: &str) -> Self {
+        Self::answering(Err(DigestError::Failed(message.to_owned())))
+    }
+
+    fn answering(answer: Result<CheckDigests, DigestError>) -> Self {
+        Self {
+            answer,
+            lookups: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub fn lookups(&self) -> Vec<String> {
+        self.lookups.borrow().clone()
+    }
+}
+
+impl DigestSource for FakeDigests {
+    fn reviewed_digests(&self, commit: &str) -> Result<CheckDigests, DigestError> {
+        self.lookups.borrow_mut().push(commit.to_owned());
+        self.answer.clone()
     }
 }

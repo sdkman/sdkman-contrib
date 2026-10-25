@@ -1,10 +1,13 @@
 mod support;
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
-use sdkman_contrib::apply::{ApplyError, RunInfo, apply_queue, apply_request, void_request};
+use sdkman_contrib::apply::{
+    ApplyError, Commits, RunInfo, apply_queue, apply_request, void_request,
+};
+use sdkman_contrib::check_digests::DigestRow;
 use sdkman_contrib::git::Git;
 use sdkman_contrib::receipt::{Receipt, ReceiptRow, StableTag};
 use sdkman_contrib::request::{Archive, Registration, Release, ReleaseVersion, Request};
@@ -12,12 +15,42 @@ use sdkman_contrib::request_path::RequestPath;
 use sdkman_contrib::state_api::WriteError;
 use sha2::{Digest, Sha256};
 use support::archives::tar_gz;
-use support::fakes::{FakeArchives, FakeHops, FakeWriter};
+use support::fakes::{FakeArchives, FakeDigests, FakeHops, FakeWriter};
 use support::fixtures::GOOD_ENTRIES;
 use support::repo::TempRepo;
 use tempfile::TempDir;
 
 const COMMIT: &str = "9e07d13";
+const MERGE_COMMIT: &str = "9e07d13c0ffee0123456789abcdef0123456789a";
+
+fn commits() -> Commits<'static> {
+    Commits {
+        receipt: COMMIT,
+        merge: MERGE_COMMIT,
+    }
+}
+
+fn reviewed_row(version: &str, file: &Path) -> DigestRow {
+    DigestRow {
+        version: version.to_owned(),
+        platform: "LINUX_X64".to_owned(),
+        sha256: sha256_of(file),
+    }
+}
+
+fn reviewed(dir: &TempDir, versions: &[&str]) -> FakeDigests {
+    FakeDigests::with_rows(
+        versions
+            .iter()
+            .map(|version| {
+                reviewed_row(
+                    version,
+                    &tar_gz(dir, &format!("{version}.tar.gz"), &GOOD_ENTRIES),
+                )
+            })
+            .collect(),
+    )
+}
 
 fn url(version: &str) -> String {
     format!("https://dl.example/jpx-{version}.tar.gz")
@@ -72,6 +105,7 @@ fn good_archives(dir: &TempDir, versions: &[&str]) -> FakeArchives {
 fn replaced_archive_writes_nothing() {
     let dir = TempDir::new().unwrap();
     let archives = good_archives(&dir, &["1.0.0"]);
+    let digests = reviewed(&dir, &["1.0.0"]);
     let declared = Archive {
         sha256: Some("0".repeat(64)),
         ..archive("1.0.0")
@@ -81,7 +115,8 @@ fn replaced_archive_writes_nothing() {
         &release(vec![("1.0.0", declared)], None),
         &writer,
         &archives,
-        COMMIT,
+        &digests,
+        commits(),
         &run(),
     )
     .unwrap_err();
@@ -95,11 +130,59 @@ fn replaced_archive_writes_nothing() {
 }
 
 #[test]
+fn missing_digests_block() {
+    let dir = TempDir::new().unwrap();
+    let archives = good_archives(&dir, &["1.0.0"]);
+    let digests = FakeDigests::missing();
+    let writer = FakeWriter::default();
+    let error = apply_request(
+        &release(vec![("1.0.0", archive("1.0.0"))], None),
+        &writer,
+        &archives,
+        &digests,
+        commits(),
+        &run(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        ApplyError::Blocked(vec![
+            "no reviewed digests were found for the merged commit".to_owned()
+        ])
+    );
+    assert_eq!(digests.lookups(), vec![MERGE_COMMIT]);
+    assert_eq!(writer.write_attempts(), 0);
+}
+
+#[test]
+fn failed_lookup_stops_the_run() {
+    let dir = TempDir::new().unwrap();
+    let archives = good_archives(&dir, &["1.0.0"]);
+    let digests = FakeDigests::failing("actions api answered 500");
+    let writer = FakeWriter::default();
+    let error = apply_request(
+        &release(vec![("1.0.0", archive("1.0.0"))], None),
+        &writer,
+        &archives,
+        &digests,
+        commits(),
+        &run(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        ApplyError::Failed("actions api answered 500".to_owned())
+    );
+    assert_eq!(writer.write_attempts(), 0);
+}
+
+#[test]
 fn redirected_archive_posts_the_written_url() {
     let dir = TempDir::new().unwrap();
     let written = "https://github.com/jpx/jpx/releases/download/v1.0.0/jpx-1.0.0.tar.gz";
     let target = "https://objects.githubusercontent.com/jpx-1.0.0.tar.gz";
     let bytes = std::fs::read(tar_gz(&dir, "1.0.0.tar.gz", &GOOD_ENTRIES)).unwrap();
+    let digests = reviewed(&dir, &["1.0.0"]);
     let hops = FakeHops::default()
         .redirecting(written, target)
         .serving(target, &bytes);
@@ -112,7 +195,8 @@ fn redirected_archive_posts_the_written_url() {
         &release(vec![("1.0.0", declared)], None),
         &writer,
         &hops,
-        COMMIT,
+        &digests,
+        commits(),
         &run(),
     )
     .unwrap();
@@ -130,12 +214,14 @@ fn undeclared_archive_without_bin_writes_nothing() {
         &[("jpx-1.0.0/", 0o755), ("jpx-1.0.0/README", 0o644)],
     );
     let archives = FakeArchives::default().serving(&url("1.0.0"), &broken);
+    let digests = FakeDigests::missing();
     let writer = FakeWriter::default();
     let error = apply_request(
         &release(vec![("1.0.0", archive("1.0.0"))], None),
         &writer,
         &archives,
-        COMMIT,
+        &digests,
+        commits(),
         &run(),
     )
     .unwrap_err();
@@ -147,12 +233,14 @@ fn undeclared_archive_without_bin_writes_nothing() {
 fn failure_in_a_later_row_writes_nothing() {
     let dir = TempDir::new().unwrap();
     let archives = good_archives(&dir, &["1.0.0"]);
+    let digests = reviewed(&dir, &["1.0.0"]);
     let writer = FakeWriter::default();
     let request = release(
         vec![("1.0.0", archive("1.0.0")), ("1.1.0", archive("1.1.0"))],
         None,
     );
-    let error = apply_request(&request, &writer, &archives, COMMIT, &run()).unwrap_err();
+    let error =
+        apply_request(&request, &writer, &archives, &digests, commits(), &run()).unwrap_err();
     assert!(error.to_string().contains("jpx 1.1.0 LINUX_X64"));
     assert_eq!(writer.write_attempts(), 0);
 }
@@ -162,12 +250,14 @@ fn undeclared_archive_posts_computed_sha256() {
     let dir = TempDir::new().unwrap();
     let file = tar_gz(&dir, "a.tar.gz", &GOOD_ENTRIES);
     let archives = FakeArchives::default().serving(&url("1.0.0"), &file);
+    let digests = FakeDigests::with_rows(vec![reviewed_row("1.0.0", &file)]);
     let writer = FakeWriter::default();
     let receipt = apply_request(
         &release(vec![("1.0.0", archive("1.0.0"))], None),
         &writer,
         &archives,
-        COMMIT,
+        &digests,
+        commits(),
         &run(),
     )
     .unwrap();
@@ -192,6 +282,7 @@ fn declared_md5_and_sha512_reach_state_and_the_receipt() {
     let dir = TempDir::new().unwrap();
     let file = tar_gz(&dir, "a.tar.gz", &GOOD_ENTRIES);
     let archives = FakeArchives::default().serving(&url("1.0.0"), &file);
+    let digests = FakeDigests::with_rows(vec![reviewed_row("1.0.0", &file)]);
     let probe = sdkman_contrib::verify::verify_release(
         &match release(vec![("1.0.0", archive("1.0.0"))], None) {
             Request::Release(release) => release,
@@ -199,10 +290,10 @@ fn declared_md5_and_sha512_reach_state_and_the_receipt() {
         },
         &archives,
     );
-    let digests = probe[0].digests.clone().unwrap();
+    let computed = probe[0].digests.clone().unwrap();
     let declared = Archive {
-        md5: Some(digests.md5.clone()),
-        sha512: Some(digests.sha512.clone()),
+        md5: Some(computed.md5.clone()),
+        sha512: Some(computed.sha512.clone()),
         ..archive("1.0.0")
     };
     let writer = FakeWriter::default();
@@ -210,22 +301,24 @@ fn declared_md5_and_sha512_reach_state_and_the_receipt() {
         &release(vec![("1.0.0", declared)], None),
         &writer,
         &archives,
-        COMMIT,
+        &digests,
+        commits(),
         &run(),
     )
     .unwrap();
     let row = &receipt.rows.unwrap()[0];
-    assert_eq!(row.md5.as_deref(), Some(digests.md5.as_str()));
-    assert_eq!(row.sha512.as_deref(), Some(digests.sha512.as_str()));
+    assert_eq!(row.md5.as_deref(), Some(computed.md5.as_str()));
+    assert_eq!(row.sha512.as_deref(), Some(computed.sha512.as_str()));
     let posted = &writer.rows()[&("1.0.0".to_owned(), "LINUX_X64".to_owned())];
-    assert_eq!(posted.md5sum.as_deref(), Some(digests.md5.as_str()));
-    assert_eq!(posted.sha512sum.as_deref(), Some(digests.sha512.as_str()));
+    assert_eq!(posted.md5sum.as_deref(), Some(computed.md5.as_str()));
+    assert_eq!(posted.sha512sum.as_deref(), Some(computed.sha512.as_str()));
 }
 
 #[test]
 fn default_rows_post_stable_tag() {
     let dir = TempDir::new().unwrap();
     let archives = good_archives(&dir, &["1.0.0", "1.1.0"]);
+    let digests = reviewed(&dir, &["1.0.0", "1.1.0"]);
     let writer = FakeWriter::default();
     let receipt = apply_request(
         &release(
@@ -234,7 +327,8 @@ fn default_rows_post_stable_tag() {
         ),
         &writer,
         &archives,
-        COMMIT,
+        &digests,
+        commits(),
         &run(),
     )
     .unwrap();
@@ -259,12 +353,14 @@ fn default_rows_post_stable_tag() {
 fn refused_row_stops_the_release_and_names_it() {
     let dir = TempDir::new().unwrap();
     let archives = good_archives(&dir, &["1.0.0", "1.1.0"]);
+    let digests = reviewed(&dir, &["1.0.0", "1.1.0"]);
     let writer = FakeWriter::failing_on("1.1.0", "LINUX_X64");
     let request = release(
         vec![("1.0.0", archive("1.0.0")), ("1.1.0", archive("1.1.0"))],
         None,
     );
-    let error = apply_request(&request, &writer, &archives, COMMIT, &run()).unwrap_err();
+    let error =
+        apply_request(&request, &writer, &archives, &digests, commits(), &run()).unwrap_err();
     assert_eq!(
         error,
         ApplyError::Write {
@@ -287,8 +383,15 @@ fn registration_posts_candidate_and_records_metadata() {
         description: "A tool.".to_owned(),
         website: "https://jpx.dev/".to_owned(),
     });
-    let receipt =
-        apply_request(&request, &writer, &FakeArchives::default(), COMMIT, &run()).unwrap();
+    let receipt = apply_request(
+        &request,
+        &writer,
+        &FakeArchives::default(),
+        &FakeDigests::missing(),
+        commits(),
+        &run(),
+    )
+    .unwrap();
     let posted = &writer.candidates()[0];
     assert_eq!(posted.description, "A tool.");
     assert_eq!(posted.website_url, "https://jpx.dev/");
@@ -379,19 +482,37 @@ fn queue_repo(requests: &[(&str, String)]) -> (TempRepo, Vec<String>) {
     (repo, commits)
 }
 
+fn tomcat_file(dir: &TempDir) -> PathBuf {
+    tar_gz(
+        dir,
+        "tomcat.tar.gz",
+        &[
+            ("tomcat-11.0.15/", 0o755),
+            ("tomcat-11.0.15/bin/", 0o755),
+            ("tomcat-11.0.15/bin/catalina.sh", 0o755),
+        ],
+    )
+}
+
 fn tomcat_archives(dir: &TempDir) -> FakeArchives {
     FakeArchives::default().serving(
         "https://dl.example/tomcat-11.0.15.tar.gz",
-        &tar_gz(
-            dir,
-            "tomcat.tar.gz",
-            &[
-                ("tomcat-11.0.15/", 0o755),
-                ("tomcat-11.0.15/bin/", 0o755),
-                ("tomcat-11.0.15/bin/catalina.sh", 0o755),
-            ],
-        ),
+        &tomcat_file(dir),
     )
+}
+
+fn queue_digests(dir: &TempDir) -> FakeDigests {
+    let jpx = |version: &str| {
+        reviewed_row(
+            version,
+            &tar_gz(dir, &format!("{version}.tar.gz"), &GOOD_ENTRIES),
+        )
+    };
+    FakeDigests::with_rows(vec![
+        reviewed_row("11.0.15", &tomcat_file(dir)),
+        jpx("1.0.0"),
+        jpx("1.1.0"),
+    ])
 }
 
 fn read_receipt(repo: &TempRepo, request: &str) -> Receipt {
@@ -420,6 +541,7 @@ fn applies_in_file_name_order_across_candidates() {
         repo.path(),
         &writer,
         &tomcat_archives(&dir),
+        &queue_digests(&dir),
         &Git::new(repo.path()),
         &run(),
     )
@@ -445,8 +567,15 @@ fn failure_blocks_later_requests() {
     let writer = FakeWriter::default();
     let git = Git::new(repo.path());
 
-    let error =
-        apply_queue(repo.path(), &writer, &tomcat_archives(&dir), &git, &run()).unwrap_err();
+    let error = apply_queue(
+        repo.path(),
+        &writer,
+        &tomcat_archives(&dir),
+        &queue_digests(&dir),
+        &git,
+        &run(),
+    )
+    .unwrap_err();
 
     assert!(error.to_string().starts_with(JPX_RELEASE), "{error}");
     assert_eq!(writer.write_attempts(), 0);
@@ -458,7 +587,15 @@ fn failure_blocks_later_requests() {
         "https://dl.example/tomcat-11.0.15.tar.gz",
         &dir.path().join("tomcat.tar.gz"),
     );
-    let applied = apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap();
+    let applied = apply_queue(
+        repo.path(),
+        &writer,
+        &archives,
+        &queue_digests(&dir),
+        &git,
+        &run(),
+    )
+    .unwrap();
     assert_eq!(applied, vec![JPX_RELEASE, TOMCAT_RELEASE]);
 }
 
@@ -470,12 +607,28 @@ fn half_applied_release_reapplies_once() {
     let writer = FakeWriter::failing_on("1.1.0", "LINUX_X64");
     let git = Git::new(repo.path());
 
-    apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap_err();
+    apply_queue(
+        repo.path(),
+        &writer,
+        &archives,
+        &queue_digests(&dir),
+        &git,
+        &run(),
+    )
+    .unwrap_err();
     assert_eq!(writer.rows().len(), 1);
     assert!(!has_receipt(&repo, JPX_RELEASE));
 
     writer.stop_failing();
-    let applied = apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap();
+    let applied = apply_queue(
+        repo.path(),
+        &writer,
+        &archives,
+        &queue_digests(&dir),
+        &git,
+        &run(),
+    )
+    .unwrap();
 
     assert_eq!(applied, vec![JPX_RELEASE]);
     assert_eq!(writer.rows().len(), 2);
@@ -499,6 +652,7 @@ fn backdated_pending_request_fails_apply() {
         repo.path(),
         &writer,
         &good_archives(&dir, &["1.0.0"]),
+        &queue_digests(&dir),
         &Git::new(repo.path()),
         &run(),
     )
@@ -525,10 +679,26 @@ fn void_unblocks_the_queue() {
     let writer = FakeWriter::default();
     let git = Git::new(repo.path());
     let archives = tomcat_archives(&dir);
-    apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap_err();
+    apply_queue(
+        repo.path(),
+        &writer,
+        &archives,
+        &queue_digests(&dir),
+        &git,
+        &run(),
+    )
+    .unwrap_err();
 
     void_request(repo.path(), &git, &run(), JPX_RELEASE, "vendor withdrew it").unwrap();
-    let applied = apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap();
+    let applied = apply_queue(
+        repo.path(),
+        &writer,
+        &archives,
+        &queue_digests(&dir),
+        &git,
+        &run(),
+    )
+    .unwrap();
 
     let receipt = read_receipt(&repo, JPX_RELEASE);
     assert_eq!(receipt.voided.as_deref(), Some("vendor withdrew it"));
@@ -548,7 +718,15 @@ fn void_refuses_applied_request() {
     let (repo, _) = queue_repo(&[(TOMCAT_RELEASE, tomcat_release_yaml())]);
     let git = Git::new(repo.path());
     let writer = FakeWriter::default();
-    apply_queue(repo.path(), &writer, &tomcat_archives(&dir), &git, &run()).unwrap();
+    apply_queue(
+        repo.path(),
+        &writer,
+        &tomcat_archives(&dir),
+        &queue_digests(&dir),
+        &git,
+        &run(),
+    )
+    .unwrap();
     let before = read_receipt(&repo, TOMCAT_RELEASE);
 
     let error = void_request(repo.path(), &git, &run(), TOMCAT_RELEASE, "oops").unwrap_err();
