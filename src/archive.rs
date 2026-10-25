@@ -1,4 +1,11 @@
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+
+use flate2::read::GzDecoder;
+use tar::EntryType;
 use url::Url;
+use zip::ZipArchive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveFormat {
@@ -45,6 +52,75 @@ pub fn check_url(url: &str, candidate: &str, version: &str) -> (Option<ArchiveFo
         ));
     }
     (format, verdict)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveEntry {
+    pub components: Vec<String>,
+    pub is_dir: bool,
+    pub executable: bool,
+}
+
+const EXECUTE_BITS: u32 = 0o111;
+
+pub fn list_entries(path: &Path, format: ArchiveFormat) -> Result<Vec<ArchiveEntry>, String> {
+    match format {
+        ArchiveFormat::Zip => list_zip(path).map_err(|error| format!("not a zip archive: {error}")),
+        ArchiveFormat::TarGz => {
+            list_tar_gz(path).map_err(|error| format!("not a tar.gz archive: {error}"))
+        }
+    }
+}
+
+fn list_zip(path: &Path) -> Result<Vec<ArchiveEntry>, Box<dyn std::error::Error>> {
+    let mut archive = ZipArchive::new(BufReader::new(File::open(path)?))?;
+    let mut entries = Vec::with_capacity(archive.len());
+    for index in 0..archive.len() {
+        let file = archive.by_index_raw(index)?;
+        let is_dir = file.is_dir();
+        let executable = !is_dir
+            && file
+                .unix_mode()
+                .is_some_and(|mode| mode & EXECUTE_BITS != 0);
+        entries.push(ArchiveEntry {
+            components: split_components(&file.name()?),
+            is_dir,
+            executable,
+        });
+    }
+    Ok(entries)
+}
+
+fn list_tar_gz(path: &Path) -> Result<Vec<ArchiveEntry>, Box<dyn std::error::Error>> {
+    let mut archive = tar::Archive::new(GzDecoder::new(BufReader::new(File::open(path)?)));
+    let mut entries = Vec::new();
+    for entry in archive.entries()? {
+        let entry = entry?;
+        let kind = entry.header().entry_type();
+        if matches!(kind, EntryType::XGlobalHeader | EntryType::XHeader) {
+            continue;
+        }
+        let carries_mode = kind.is_file() || kind.is_symlink() || kind.is_hard_link();
+        let executable = carries_mode && entry.header().mode()? & EXECUTE_BITS != 0;
+        entries.push(ArchiveEntry {
+            components: split_components(&entry.path()?.to_string_lossy()),
+            is_dir: kind.is_dir(),
+            executable,
+        });
+    }
+    Ok(entries)
+}
+
+fn split_components(name: &str) -> Vec<String> {
+    let mut components: Vec<String> = name
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if components.first().is_some_and(|first| first == ".") {
+        components.remove(0);
+    }
+    components
 }
 
 #[cfg(test)]
