@@ -47,10 +47,16 @@ pub struct HttpArchiveSource {
 
 impl HttpArchiveSource {
     pub fn new() -> Self {
+        Self::with_response_timeout(Duration::from_secs(30))
+    }
+
+    pub fn with_response_timeout(response_timeout: Duration) -> Self {
         let agent = ureq::Agent::config_builder()
             .max_redirects(0)
             .http_status_as_error(false)
             .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_recv_response(Some(response_timeout))
+            .timeout_per_read(Some(Duration::from_secs(60)))
             .user_agent(concat!("sdkman-contrib/", env!("CARGO_PKG_VERSION")))
             .build()
             .into();

@@ -1,5 +1,6 @@
 use std::fs;
 use std::thread;
+use std::time::Duration;
 
 use sdkman_contrib::digest::HashingWriter;
 use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError, HttpArchiveSource};
@@ -77,4 +78,20 @@ fn identifies_itself_as_sdkman_contrib() {
     HttpArchiveSource::new().fetch(&url).unwrap();
     let expected = format!("sdkman-contrib/{}", env!("CARGO_PKG_VERSION"));
     assert_eq!(seen.join().unwrap(), Some(expected));
+}
+
+#[test]
+fn stalled_server_is_a_transport_error() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/jpx-1.0.zip", server.server_addr());
+    let stalled = thread::spawn(move || {
+        let held = server.recv().unwrap();
+        thread::sleep(Duration::from_secs(3));
+        drop(held);
+    });
+    let error = HttpArchiveSource::with_response_timeout(Duration::from_millis(300))
+        .fetch(&url)
+        .err();
+    assert!(matches!(error, Some(FetchError::Transport(_))), "{error:?}");
+    stalled.join().unwrap();
 }

@@ -100,6 +100,7 @@ impl HttpState {
         let agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_global(Some(Duration::from_secs(60)))
             .user_agent(concat!("sdkman-contrib/", env!("CARGO_PKG_VERSION")))
             .build()
             .into();
