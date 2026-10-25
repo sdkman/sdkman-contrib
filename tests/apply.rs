@@ -263,9 +263,11 @@ fn registration_posts_candidate_and_records_metadata() {
     let receipt =
         apply_request(&request, &writer, &FakeArchives::default(), COMMIT, &run()).unwrap();
     let posted = &writer.candidates()[0];
+    assert_eq!(posted.description, "A tool.");
     assert_eq!(posted.website_url, "https://jpx.dev/");
     let register = receipt.register.unwrap();
     assert_eq!(register.name, "JPX");
+    assert_eq!(register.description, "A tool.");
     assert_eq!(register.website, "https://jpx.dev/");
     assert!(receipt.rows.is_none() && receipt.tag.is_none());
     assert_eq!(receipt.commit, COMMIT);

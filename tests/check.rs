@@ -7,6 +7,8 @@ use sdkman_contrib::receipt::{Receipt, write_receipt};
 use sdkman_contrib::request_path::{RequestPath, Timestamp};
 use sdkman_contrib::state_api::Answer;
 use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::path::Path;
 use support::archives::write_zip;
 use support::fakes::{FakeArchives, FakeValidator};
 use support::fixtures::{GOOD_ENTRIES_1_2_0 as GOOD_ENTRIES, REGISTRATION, REGISTRATION_PATH};
@@ -199,6 +201,10 @@ impl Fixture {
     }
 }
 
+fn sha256_of(file: &Path) -> String {
+    hex::encode(Sha256::digest(std::fs::read(file).unwrap()))
+}
+
 fn good_release() -> Fixture {
     let fixture = Fixture::new().serving(ARCHIVE_URL, "a.zip", &GOOD_ENTRIES);
     fixture.repo.write(RELEASE_PATH, RELEASE);
@@ -234,14 +240,26 @@ fn refused_registration_fails_with_state_message() {
 
 #[test]
 fn unregistered_candidate_fails_each_row() {
-    let fixture = good_release();
-    let validator = FakeValidator::default().then(refusal("jpx is not registered"));
+    let second_url = "https://downloads.jpx.dev/jpx-1.2.0-mac.zip";
+    let fixture = good_release().serving(second_url, "b.zip", &GOOD_ENTRIES);
+    let release = RELEASE.replace(
+        "      LINUX_X64: https://downloads.jpx.dev/jpx-1.2.0.zip\n",
+        &format!("      LINUX_X64: {ARCHIVE_URL}\n      MAC_ARM64: {second_url}\n"),
+    );
+    fixture.repo.write(RELEASE_PATH, &release);
+    let validator = FakeValidator::default()
+        .then(refusal("jpx is not registered"))
+        .then(refusal("jpx is not registered"));
     let report = fixture.check(&validator, RELEASE_PATH);
+    let text = report.render_text();
     assert!(report.has_failures());
-    assert!(
-        report
-            .render_text()
-            .contains("candidate: jpx is not registered")
+    assert_eq!(text.matches("FAIL").count(), 2, "{text}");
+    assert!(text.contains("LINUX_X64"), "{text}");
+    assert!(text.contains("MAC_ARM64"), "{text}");
+    assert_eq!(
+        text.matches("candidate: jpx is not registered").count(),
+        2,
+        "{text}"
     );
 }
 
@@ -258,7 +276,10 @@ fn passing_release_is_ok_and_posts_the_computed_sha256() {
     );
     let bodies = validator.versions();
     assert_eq!(bodies.len(), 1);
-    assert_eq!(bodies[0].sha256sum.len(), 64);
+    assert_eq!(
+        bodies[0].sha256sum,
+        sha256_of(&fixture.dir.path().join("a.zip"))
+    );
     assert!(report.render_text().contains(&bodies[0].sha256sum));
 }
 

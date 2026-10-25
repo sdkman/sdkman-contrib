@@ -125,4 +125,13 @@ fn new_register_writes_a_registration() {
         .assert()
         .success()
         .stdout(predicate::str::ends_with("-register-jpx.yaml\n"));
+    let written = std::fs::read_dir(repo.path().join("requests/jpx"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let text = std::fs::read_to_string(written).unwrap();
+    assert!(text.starts_with("candidate: jpx"), "{text}");
+    assert!(text.contains("register:"), "{text}");
 }
