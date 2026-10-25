@@ -656,6 +656,30 @@ fn applies_in_file_name_order_across_candidates() {
 }
 
 #[test]
+fn queue_looks_up_the_full_merge_commit() {
+    let dir = TempDir::new().unwrap();
+    let (repo, _) = queue_repo(&[
+        (JPX_REGISTER, REGISTER_YAML.to_owned()),
+        (TOMCAT_RELEASE, tomcat_release_yaml()),
+    ]);
+    let tomcat_commit = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let digests = queue_digests(&dir);
+
+    apply_queue(
+        repo.path(),
+        &FakeWriter::default(),
+        &tomcat_archives(&dir),
+        &digests,
+        &Git::new(repo.path()),
+        &run(),
+    )
+    .unwrap();
+
+    assert_eq!(digests.lookups(), vec![tomcat_commit.clone()]);
+    assert_eq!(tomcat_commit.len(), 40);
+}
+
+#[test]
 fn failure_blocks_later_requests() {
     let dir = TempDir::new().unwrap();
     let (repo, _) = queue_repo(&[
