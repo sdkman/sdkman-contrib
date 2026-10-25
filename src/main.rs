@@ -191,6 +191,15 @@ fn apply(args: ApplyArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let (Some(repository), Some(github_token)) = (
+        non_empty_env("GITHUB_REPOSITORY"),
+        non_empty_env("GITHUB_TOKEN"),
+    ) else {
+        eprintln!("missing GITHUB_REPOSITORY or GITHUB_TOKEN");
+        return ExitCode::from(2);
+    };
+    let github_api_url =
+        non_empty_env("GITHUB_API_URL").unwrap_or_else(|| "https://api.github.com".to_owned());
     let state_url = resolve_state_url(env::var("CONTRIB_STATE_URL").ok());
     eprintln!("applying to {state_url}");
 
@@ -211,11 +220,7 @@ fn apply(args: ApplyArgs) -> ExitCode {
     }
 
     let archives = HttpArchiveSource::new();
-    let digests = GitHubDigests::new(
-        &env::var("GITHUB_API_URL").unwrap_or_default(),
-        &env::var("GITHUB_REPOSITORY").unwrap_or_default(),
-        &env::var("GITHUB_TOKEN").unwrap_or_default(),
-    );
+    let digests = GitHubDigests::new(&github_api_url, &repository, &github_token);
     match apply_queue(&repo_root, &state, &archives, &digests, &git, &run) {
         Ok(applied) => {
             for path in applied {
