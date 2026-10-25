@@ -74,3 +74,20 @@ jobs:
           path: digests.json
           retention-days: 90
           if-no-files-found: error
+      - name: Post request check status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          state=failure
+          if [ "$JOB_STATUS" = "success" ]; then
+            state=success
+          fi
+          gh api --method POST "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state="$state" \
+            -f context="contrib/request-check" \
+            -f target_url="$RUN_URL"

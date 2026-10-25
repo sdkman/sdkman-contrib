@@ -6,6 +6,6 @@ on:
     types: [completed]
 jobs:
   notify:
-    if: github.event.workflow_run.event != 'pull_request'
+    if: github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.event != 'pull_request_target'
     uses: sdkman/.github/.github/workflows/reusable-workflow-failure-alert.yml@main
     secrets: inherit
