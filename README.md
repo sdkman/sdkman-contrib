@@ -243,4 +243,10 @@ A maintainer can run the `Apply` workflow by hand to retry the queue. Its option
 
 ## Developing `contrib`
 
-`contrib` is a Rust crate. The design is in [`specs/001-community-contributions.md`](specs/001-community-contributions.md). The verification gate is in [`CLAUDE.md`](CLAUDE.md).
+`contrib` is a Rust crate. The design is in [`specs/001-community-contributions.md`](specs/001-community-contributions.md) and [`specs/002-review-follow-ups.md`](specs/002-review-follow-ups.md). The verification gate is in [`CLAUDE.md`](CLAUDE.md).
+
+### Releasing `contrib`
+
+A PR bumps `version` in `Cargo.toml` and `Cargo.lock`. Once it is merged, a maintainer runs `cargo release tag --execute` and then `cargo release push --execute` on `main`. The tag is `v<version>`, and the push sends only the tag; [`release.toml`](release.toml) holds the settings.
+
+The `Release` workflow takes it from there. The environment `release` deploys only from `v*` tags and holds `VENDOR_EMAIL` and `VENDOR_PASSWORD`.
