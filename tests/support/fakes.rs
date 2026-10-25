@@ -1,10 +1,10 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError};
-use sdkman_contrib::state_api::{Answer, StateValidator};
+use sdkman_contrib::state_api::{Answer, StateValidator, StateWriter, WriteError};
 use sdkman_contrib::state_body::{CandidateBody, VersionBody};
 
 /// Answers a URL with the bytes of a local file, and `404` for any URL it was not given.
@@ -82,5 +82,56 @@ impl StateValidator for FakeValidator {
     fn validate_candidate(&self, body: &CandidateBody) -> Result<Answer, String> {
         self.candidates.borrow_mut().push(body.clone());
         self.next()
+    }
+}
+
+/// Keeps the last body posted for each version and platform, as State's upsert does. Refuses the row it was told to fail on.
+#[derive(Default)]
+pub struct FakeWriter {
+    candidates: RefCell<Vec<CandidateBody>>,
+    rows: RefCell<BTreeMap<(String, String), VersionBody>>,
+    attempts: Cell<usize>,
+    failing_row: Option<(String, String)>,
+}
+
+impl FakeWriter {
+    pub fn failing_on(version: &str, platform: &str) -> Self {
+        Self {
+            failing_row: Some((version.to_owned(), platform.to_owned())),
+            ..Self::default()
+        }
+    }
+
+    pub fn rows(&self) -> BTreeMap<(String, String), VersionBody> {
+        self.rows.borrow().clone()
+    }
+
+    pub fn candidates(&self) -> Vec<CandidateBody> {
+        self.candidates.borrow().clone()
+    }
+
+    pub fn write_attempts(&self) -> usize {
+        self.attempts.get()
+    }
+}
+
+impl StateWriter for FakeWriter {
+    fn post_candidate(&self, body: &CandidateBody) -> Result<(), WriteError> {
+        self.attempts.set(self.attempts.get() + 1);
+        self.candidates.borrow_mut().push(body.clone());
+        Ok(())
+    }
+
+    fn post_version(&self, body: &VersionBody) -> Result<(), WriteError> {
+        self.attempts.set(self.attempts.get() + 1);
+        let key = (body.version.clone(), body.platform.clone());
+        if self.failing_row.as_ref() == Some(&key) {
+            return Err(WriteError::Refused {
+                status: 400,
+                messages: vec!["refused on demand".to_owned()],
+            });
+        }
+        self.rows.borrow_mut().insert(key, body.clone());
+        Ok(())
     }
 }

@@ -1,3 +1,4 @@
+pub mod apply;
 pub mod archive;
 pub mod change_set;
 pub mod check;
