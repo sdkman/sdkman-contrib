@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use sdkman_contrib::publish::RELEASE_PLATFORMS;
 use tempfile::TempDir;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
@@ -45,4 +46,33 @@ pub fn tar_gz(dir: &TempDir, name: &str, entries: &[(&str, u32)]) -> PathBuf {
     let path = dir.path().join(name);
     write_tar_gz(&path, entries);
     path
+}
+
+pub fn write_release(dir: &Path, version: &str, base_directory: &str) {
+    for release_platform in &RELEASE_PLATFORMS {
+        write_release_archive(dir, version, release_platform.suffix, base_directory);
+    }
+}
+
+pub fn write_release_archive(dir: &Path, version: &str, suffix: &str, base_directory: &str) {
+    let path = dir.join(format!("contrib-{version}-{suffix}"));
+    let binary = if suffix.ends_with(".zip") {
+        "contrib.exe"
+    } else {
+        "contrib"
+    };
+    let entries = [
+        (format!("{base_directory}/"), 0o755),
+        (format!("{base_directory}/bin/"), 0o755),
+        (format!("{base_directory}/bin/{binary}"), 0o755),
+    ];
+    let entries: Vec<(&str, u32)> = entries
+        .iter()
+        .map(|(name, mode)| (name.as_str(), *mode))
+        .collect();
+    if suffix.ends_with(".zip") {
+        write_zip(&path, &entries);
+    } else {
+        write_tar_gz(&path, &entries);
+    }
 }
