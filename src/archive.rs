@@ -111,6 +111,73 @@ fn list_tar_gz(path: &Path) -> Result<Vec<ArchiveEntry>, Box<dyn std::error::Err
     Ok(entries)
 }
 
+const WINDOWS_PLATFORM: &str = "WINDOWS_X64";
+
+pub fn check_layout(
+    entries: &[ArchiveEntry],
+    candidate: &str,
+    version: &str,
+    platform: &str,
+) -> Verdict {
+    let mut verdict = Verdict::default();
+    let Some(base) = base_directory(entries) else {
+        verdict
+            .failures
+            .push("does not hold exactly one base directory".to_owned());
+        return verdict;
+    };
+    let in_base = || entries.iter().filter(|entry| entry.components.len() > 1);
+    let has_bin = in_base()
+        .any(|entry| entry.components[1] == "bin" && (entry.components.len() > 2 || entry.is_dir));
+    if !has_bin {
+        verdict.failures.push(format!("no bin/ under {base}/"));
+    } else if platform != WINDOWS_PLATFORM
+        && !in_base().any(|entry| {
+            entry.components.len() == 3 && entry.components[1] == "bin" && entry.executable
+        })
+    {
+        verdict
+            .failures
+            .push(format!("no executable file in {base}/bin/"));
+    }
+    let conventional = format!("{candidate}-{version}");
+    if base != conventional {
+        verdict.warnings.push(format!(
+            "base directory is '{base}' (expected '{conventional}')"
+        ));
+    }
+    verdict
+}
+
+fn base_directory(entries: &[ArchiveEntry]) -> Option<&str> {
+    let named: Vec<&ArchiveEntry> = entries
+        .iter()
+        .filter(|entry| !entry.components.is_empty())
+        .collect();
+    let base = named.first()?.components[0].as_str();
+    let one_root = named
+        .iter()
+        .all(|entry| entry.components[0] == base && (entry.components.len() > 1 || entry.is_dir));
+    let has_content = named.iter().any(|entry| entry.components.len() > 1);
+    (one_root && has_content).then_some(base)
+}
+
+pub fn inspect_archive(
+    path: &Path,
+    format: ArchiveFormat,
+    candidate: &str,
+    version: &str,
+    platform: &str,
+) -> Verdict {
+    match list_entries(path, format) {
+        Ok(entries) => check_layout(&entries, candidate, version, platform),
+        Err(error) => Verdict {
+            failures: vec![error],
+            warnings: Vec::new(),
+        },
+    }
+}
+
 fn split_components(name: &str) -> Vec<String> {
     let mut components: Vec<String> = name
         .split('/')
