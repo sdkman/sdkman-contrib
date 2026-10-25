@@ -24,6 +24,8 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 jobs:
   apply:
@@ -59,6 +61,7 @@ jobs:
           COMMUNITY_EMAIL: ${{ secrets.COMMUNITY_EMAIL }}
           COMMUNITY_PASSWORD: ${{ secrets.COMMUNITY_PASSWORD }}
           CONTRIB_STATE_URL: ${{ vars.CONTRIB_STATE_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
           VOID: ${{ inputs.void }}
           REASON: ${{ inputs.reason }}
         run: |
