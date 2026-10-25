@@ -11,6 +11,7 @@ use crate::receipt::{
     Receipt, ReceiptRow, RegisteredMetadata, StableTag, pending_requests, write_receipt,
 };
 use crate::request::{Registration, Release, Request};
+use crate::request_path::RequestPath;
 use crate::state_api::{StateWriter, WriteError};
 use crate::state_body::{candidate_body, version_body};
 use crate::verify::verify_release;
@@ -114,6 +115,49 @@ fn apply_pending(
     write_receipt(repo_root, &path, &receipt).map_err(rejected)?;
     let receipt_path = path.receipt_path().to_string_lossy().replace('\\', "/");
     git.commit_and_push(&receipt_path, &format!("chore(apply): record {repo_path}"))
+        .map_err(rejected)
+}
+
+pub fn void_request(
+    repo_root: &Path,
+    git: &Git,
+    run: &RunInfo,
+    repo_path: &str,
+    reason: &str,
+) -> Result<(), ApplyError> {
+    void_pending(repo_root, git, run, repo_path, reason).map_err(|cause| ApplyError::Request {
+        path: repo_path.to_owned(),
+        cause: Box::new(cause),
+    })
+}
+
+fn void_pending(
+    repo_root: &Path,
+    git: &Git,
+    run: &RunInfo,
+    repo_path: &str,
+    reason: &str,
+) -> Result<(), ApplyError> {
+    let path = RequestPath::parse(repo_path).map_err(rejected)?;
+    if !repo_root.join(repo_path).is_file() {
+        return Err(rejected("no such request"));
+    }
+    let receipt_path = path.receipt_path().to_string_lossy().replace('\\', "/");
+    if repo_root.join(&receipt_path).exists() {
+        return Err(rejected("already has a receipt"));
+    }
+    let commit = git.added_in(repo_path).map_err(rejected)?;
+    let receipt = Receipt {
+        applied_at: run.applied_at.clone(),
+        commit,
+        run: run.run_url.clone(),
+        rows: None,
+        tag: None,
+        register: None,
+        voided: Some(reason.to_owned()),
+    };
+    write_receipt(repo_root, &path, &receipt).map_err(rejected)?;
+    git.commit_and_push(&receipt_path, &format!("chore(apply): void {repo_path}"))
         .map_err(rejected)
 }
 

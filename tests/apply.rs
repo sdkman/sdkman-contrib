@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
-use sdkman_contrib::apply::{ApplyError, RunInfo, apply_queue, apply_request};
+use sdkman_contrib::apply::{ApplyError, RunInfo, apply_queue, apply_request, void_request};
 use sdkman_contrib::git::Git;
 use sdkman_contrib::receipt::{Receipt, ReceiptRow, StableTag};
 use sdkman_contrib::request::{Archive, Registration, Release, ReleaseVersion, Request};
@@ -481,4 +481,67 @@ fn backdated_pending_request_fails_apply() {
     );
     assert_eq!(writer.write_attempts(), 0);
     assert!(!has_receipt(&repo, backdated));
+}
+
+#[test]
+fn void_unblocks_the_queue() {
+    let dir = TempDir::new().unwrap();
+    let (repo, commits) = queue_repo(&[
+        (JPX_RELEASE, jpx_release_yaml(&["1.0.0"])),
+        (TOMCAT_RELEASE, tomcat_release_yaml()),
+    ]);
+    let writer = FakeWriter::default();
+    let git = Git::new(repo.path());
+    let archives = tomcat_archives(&dir);
+    apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap_err();
+
+    void_request(repo.path(), &git, &run(), JPX_RELEASE, "vendor withdrew it").unwrap();
+    let applied = apply_queue(repo.path(), &writer, &archives, &git, &run()).unwrap();
+
+    let receipt = read_receipt(&repo, JPX_RELEASE);
+    assert_eq!(receipt.voided.as_deref(), Some("vendor withdrew it"));
+    assert!(receipt.rows.is_none() && receipt.tag.is_none() && receipt.register.is_none());
+    assert!(commits[0].starts_with(&receipt.commit));
+    assert_eq!(applied, vec![TOMCAT_RELEASE]);
+    assert_eq!(writer.rows().len(), 1);
+    assert!(
+        repo.remote_log()
+            .contains(&format!("chore(apply): void {JPX_RELEASE}"))
+    );
+}
+
+#[test]
+fn void_refuses_applied_request() {
+    let dir = TempDir::new().unwrap();
+    let (repo, _) = queue_repo(&[(TOMCAT_RELEASE, tomcat_release_yaml())]);
+    let git = Git::new(repo.path());
+    let writer = FakeWriter::default();
+    apply_queue(repo.path(), &writer, &tomcat_archives(&dir), &git, &run()).unwrap();
+    let before = read_receipt(&repo, TOMCAT_RELEASE);
+
+    let error = void_request(repo.path(), &git, &run(), TOMCAT_RELEASE, "oops").unwrap_err();
+
+    assert!(error.to_string().starts_with(TOMCAT_RELEASE), "{error}");
+    assert!(
+        error.to_string().contains("already has a receipt"),
+        "{error}"
+    );
+    assert_eq!(read_receipt(&repo, TOMCAT_RELEASE), before);
+}
+
+#[test]
+fn void_refuses_missing_request() {
+    let (repo, _) = queue_repo(&[]);
+
+    let error = void_request(
+        repo.path(),
+        &Git::new(repo.path()),
+        &run(),
+        JPX_RELEASE,
+        "oops",
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("no such request"), "{error}");
+    assert!(!has_receipt(&repo, JPX_RELEASE));
 }
