@@ -33,20 +33,33 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.platform }}
     needs: verify
     strategy:
       fail-fast: true
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          - platform: LINUX_X64
+            target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-          - target: x86_64-pc-windows-msvc
+            suffix: linux-x64.tar.gz
+          - platform: LINUX_ARM64
+            target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            suffix: linux-arm64.tar.gz
+          - platform: MAC_X64
+            target: x86_64-apple-darwin
+            os: macos-latest
+            suffix: macos-x64.tar.gz
+          - platform: MAC_ARM64
+            target: aarch64-apple-darwin
+            os: macos-latest
+            suffix: macos-arm64.tar.gz
+          - platform: WINDOWS_X64
+            target: x86_64-pc-windows-msvc
             os: windows-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: x86_64-apple-darwin
-            os: macos-latest
+            suffix: windows-x64.zip
+            rustflags: -C target-feature=+crt-static
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -60,30 +73,45 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-targets: "false"
+      - name: Install cross
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Build with cross
+        if: runner.os == 'Linux'
+        run: cross build --release --locked --target ${{ matrix.target }}
       - name: Build
+        if: runner.os != 'Linux'
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
         if: runner.os != 'Windows'
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
           TARGET: ${{ matrix.target }}
+          SUFFIX: ${{ matrix.suffix }}
         run: |
-          mkdir dist
-          tar -czf "dist/contrib-$TAG-$TARGET.tar.gz" -C "target/$TARGET/release" contrib
+          mkdir -p dist "contrib-$VERSION/bin"
+          cp "target/$TARGET/release/contrib" "contrib-$VERSION/bin/contrib"
+          COPYFILE_DISABLE=1 tar -czf "dist/contrib-$VERSION-$SUFFIX" "contrib-$VERSION"
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
           TARGET: ${{ matrix.target }}
+          SUFFIX: ${{ matrix.suffix }}
         run: |
-          mkdir dist
-          7z a "dist/contrib-$TAG-$TARGET.zip" "./target/$TARGET/release/contrib.exe"
+          mkdir -p dist "contrib-$VERSION/bin"
+          cp "target/$TARGET/release/contrib.exe" "contrib-$VERSION/bin/contrib.exe"
+          7z a "dist/contrib-$VERSION-$SUFFIX" "contrib-$VERSION"
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: contrib-${{ matrix.target }}
+          name: contrib-${{ matrix.platform }}
           path: dist/contrib-*
 
   publish:
