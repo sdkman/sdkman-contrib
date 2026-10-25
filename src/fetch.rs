@@ -3,6 +3,7 @@ use std::io::{self, Read};
 use std::time::Duration;
 
 use tempfile::NamedTempFile;
+use url::Url;
 
 use crate::digest::{Digests, HashingWriter};
 use crate::http::agent_config;
@@ -23,7 +24,9 @@ impl Download {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FetchError {
-    Redirect(u16),
+    TooManyRedirects,
+    InsecureRedirect,
+    BadRedirect,
     Status(u16),
     Transport(String),
 }
@@ -31,15 +34,59 @@ pub enum FetchError {
 impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Redirect(status) => write!(f, "answered a redirect ({status})"),
+            Self::TooManyRedirects => write!(f, "followed more than {MAX_REDIRECTS} redirects"),
+            Self::InsecureRedirect => write!(f, "redirected to a URL that is not https"),
+            Self::BadRedirect => write!(f, "redirected without a usable Location"),
             Self::Status(status) => write!(f, "answered {status}, expected 200"),
             Self::Transport(message) => write!(f, "could not be downloaded: {message}"),
         }
     }
 }
 
+pub const MAX_REDIRECTS: usize = 5;
+
 pub trait ArchiveSource {
     fn fetch(&self, url: &str) -> Result<Download, FetchError>;
+}
+
+pub struct Hop {
+    pub status: u16,
+    pub location: Option<String>,
+    pub body: Box<dyn Read>,
+}
+
+pub trait HttpGet {
+    fn get(&self, url: &str) -> Result<Hop, FetchError>;
+}
+
+pub fn follow_redirects(source: &dyn HttpGet, url: &str) -> Result<Download, FetchError> {
+    let mut target = url.to_owned();
+    let mut redirects = 0;
+    loop {
+        let hop = source.get(&target)?;
+        match hop.status {
+            200 => {
+                return Download::from_reader(hop.body)
+                    .map_err(|e| FetchError::Transport(e.to_string()));
+            }
+            300..=399 => {
+                if redirects == MAX_REDIRECTS {
+                    return Err(FetchError::TooManyRedirects);
+                }
+                redirects += 1;
+                let location = hop.location.ok_or(FetchError::BadRedirect)?;
+                let current = Url::parse(&target).map_err(|_| FetchError::BadRedirect)?;
+                let next = current
+                    .join(&location)
+                    .map_err(|_| FetchError::BadRedirect)?;
+                if next.scheme() != "https" {
+                    return Err(FetchError::InsecureRedirect);
+                }
+                target = next.into();
+            }
+            status => return Err(FetchError::Status(status)),
+        }
+    }
 }
 
 pub struct HttpArchiveSource {
@@ -68,18 +115,28 @@ impl Default for HttpArchiveSource {
     }
 }
 
-impl ArchiveSource for HttpArchiveSource {
-    fn fetch(&self, url: &str) -> Result<Download, FetchError> {
+impl HttpGet for HttpArchiveSource {
+    fn get(&self, url: &str) -> Result<Hop, FetchError> {
         let response = self
             .agent
             .get(url)
             .call()
             .map_err(|e| FetchError::Transport(e.to_string()))?;
-        match response.status().as_u16() {
-            200 => Download::from_reader(response.into_body().into_reader())
-                .map_err(|e| FetchError::Transport(e.to_string())),
-            status @ 300..=399 => Err(FetchError::Redirect(status)),
-            status => Err(FetchError::Status(status)),
-        }
+        let location = response
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        Ok(Hop {
+            status: response.status().as_u16(),
+            location,
+            body: Box::new(response.into_body().into_reader()),
+        })
+    }
+}
+
+impl ArchiveSource for HttpArchiveSource {
+    fn fetch(&self, url: &str) -> Result<Download, FetchError> {
+        follow_redirects(self, url)
     }
 }

@@ -1,9 +1,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::File;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError};
+use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError, Hop, HttpGet, follow_redirects};
 use sdkman_contrib::state_api::{Answer, StateValidator, StateWriter, WriteError};
 use sdkman_contrib::state_body::{CandidateBody, VersionBody};
 
@@ -31,6 +32,65 @@ impl ArchiveSource for FakeArchives {
         let path = self.files.get(url).ok_or(FetchError::Status(404))?;
         let file = File::open(path).map_err(|error| FetchError::Transport(error.to_string()))?;
         Download::from_reader(file).map_err(|error| FetchError::Transport(error.to_string()))
+    }
+}
+
+enum Scripted {
+    Redirect(Option<String>),
+    Bytes(Vec<u8>),
+}
+
+/// Answers each URL with its scripted hop, and `404` for any URL it was not given.
+#[derive(Default)]
+pub struct FakeHops {
+    hops: HashMap<String, Scripted>,
+    requested: RefCell<Vec<String>>,
+}
+
+impl FakeHops {
+    pub fn redirecting(mut self, from: &str, location: &str) -> Self {
+        self.hops.insert(
+            from.to_owned(),
+            Scripted::Redirect(Some(location.to_owned())),
+        );
+        self
+    }
+
+    pub fn redirecting_without_location(mut self, from: &str) -> Self {
+        self.hops.insert(from.to_owned(), Scripted::Redirect(None));
+        self
+    }
+
+    pub fn serving(mut self, url: &str, bytes: &[u8]) -> Self {
+        self.hops
+            .insert(url.to_owned(), Scripted::Bytes(bytes.to_vec()));
+        self
+    }
+
+    pub fn requested(&self) -> Vec<String> {
+        self.requested.borrow().clone()
+    }
+}
+
+impl HttpGet for FakeHops {
+    fn get(&self, url: &str) -> Result<Hop, FetchError> {
+        self.requested.borrow_mut().push(url.to_owned());
+        let (status, location, bytes) = match self.hops.get(url) {
+            Some(Scripted::Redirect(location)) => (302, location.clone(), Vec::new()),
+            Some(Scripted::Bytes(bytes)) => (200, None, bytes.clone()),
+            None => (404, None, Vec::new()),
+        };
+        Ok(Hop {
+            status,
+            location,
+            body: Box::new(Cursor::new(bytes)),
+        })
+    }
+}
+
+impl ArchiveSource for FakeHops {
+    fn fetch(&self, url: &str) -> Result<Download, FetchError> {
+        follow_redirects(self, url)
     }
 }
 

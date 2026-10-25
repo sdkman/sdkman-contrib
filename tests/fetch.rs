@@ -6,6 +6,9 @@ use sdkman_contrib::digest::HashingWriter;
 use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError, HttpArchiveSource};
 use tiny_http::{Header, Response, Server};
 
+mod support;
+use support::fakes::FakeHops;
+
 const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
 fn serve_once(response: Response<std::io::Cursor<Vec<u8>>>) -> String {
@@ -28,7 +31,7 @@ fn downloads_bytes_and_digests() {
 }
 
 #[test]
-fn refuses_redirect() {
+fn refuses_redirect_to_http() {
     let location = Header::from_bytes("Location", "http://127.0.0.1:1/elsewhere").unwrap();
     let url = serve_once(
         Response::from_data(Vec::new())
@@ -37,8 +40,71 @@ fn refuses_redirect() {
     );
     assert_eq!(
         HttpArchiveSource::new().fetch(&url).err(),
-        Some(FetchError::Redirect(302))
+        Some(FetchError::InsecureRedirect)
     );
+}
+
+fn hop_url(n: usize) -> String {
+    format!("https://example.test/hop{n}")
+}
+
+fn chain_of(redirects: usize) -> FakeHops {
+    let hops = (0..redirects).fold(FakeHops::default(), |hops, n| {
+        hops.redirecting(&hop_url(n), &hop_url(n + 1))
+    });
+    hops.serving(&hop_url(redirects), b"abc")
+}
+
+#[test]
+fn five_https_redirects_pass() {
+    let download = chain_of(5).fetch(&hop_url(0)).unwrap();
+    assert_eq!(download.digests.sha256, ABC_SHA256);
+}
+
+#[test]
+fn sixth_redirect_fails() {
+    assert_eq!(
+        chain_of(6).fetch(&hop_url(0)).err(),
+        Some(FetchError::TooManyRedirects)
+    );
+}
+
+#[test]
+fn http_hop_fails() {
+    let hops = FakeHops::default()
+        .redirecting(&hop_url(0), "http://example.test/archive.zip")
+        .serving("http://example.test/archive.zip", b"abc");
+    assert_eq!(
+        hops.fetch(&hop_url(0)).err(),
+        Some(FetchError::InsecureRedirect)
+    );
+    assert_eq!(hops.requested(), vec![hop_url(0)]);
+}
+
+#[test]
+fn redirect_without_location_fails() {
+    let hops = FakeHops::default().redirecting_without_location(&hop_url(0));
+    assert_eq!(hops.fetch(&hop_url(0)).err(), Some(FetchError::BadRedirect));
+}
+
+#[test]
+fn unparsable_location_fails() {
+    let hops = FakeHops::default().redirecting(&hop_url(0), "https://");
+    assert_eq!(hops.fetch(&hop_url(0)).err(), Some(FetchError::BadRedirect));
+}
+
+#[test]
+fn relative_location_resolves_against_the_current_url() {
+    let hops = FakeHops::default()
+        .redirecting("https://example.test/a/start", "../files/jpx.zip")
+        .serving("https://example.test/files/jpx.zip", b"abc");
+    assert!(hops.fetch("https://example.test/a/start").is_ok());
+}
+
+#[test]
+fn redirect_chain_ending_in_404_fails() {
+    let hops = FakeHops::default().redirecting(&hop_url(0), &hop_url(1));
+    assert_eq!(hops.fetch(&hop_url(0)).err(), Some(FetchError::Status(404)));
 }
 
 #[test]
