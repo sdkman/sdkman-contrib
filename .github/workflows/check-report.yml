@@ -2,7 +2,7 @@ name: Check Report
 
 on:
   workflow_run:
-    workflows: ["Pull Requests"]
+    workflows: ["Request Check"]
     types:
       - completed
 
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   check-report:
-    if: github.event.workflow_run.event == 'pull_request'
+    if: github.event.workflow_run.event == 'pull_request_target'
     runs-on: ubuntu-latest
 
     steps:
@@ -30,17 +30,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           if [ ! -f report.md ]; then
             exit 0
           fi
+          reviewed_sha=$(tr -d '[:space:]' < head-sha)
           pr_number=$(tr -d '[:space:]' < pr-number)
           case "$pr_number" in
             ''|*[!0-9]*) exit 0 ;;
           esac
           pr_head_sha=$(gh api "repos/$REPO/pulls/$pr_number" --jq .head.sha)
-          if [ "$pr_head_sha" != "$HEAD_SHA" ]; then
+          if [ "$pr_head_sha" != "$reviewed_sha" ]; then
             exit 0
           fi
           echo "number=$pr_number" >> "$GITHUB_OUTPUT"
