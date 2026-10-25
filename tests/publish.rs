@@ -4,8 +4,7 @@ use std::fs;
 
 use sdkman_contrib::publish::{PublishError, RELEASE_PLATFORMS, publish_release, release_bodies};
 use sdkman_contrib::state_body::VersionBody;
-use sha2::{Digest, Sha256};
-use support::archives::{write_release, write_release_archive};
+use support::archives::{sha256_of, write_release, write_release_archive};
 use support::fakes::FakeVendorState;
 use tempfile::TempDir;
 
@@ -214,8 +213,7 @@ fn reads_five_good_archives() {
         assert_eq!(body.version, VERSION);
         assert_eq!(body.platform, release_platform.platform);
         assert_eq!(body.url, format!("{URL_BASE}/{file_name}"));
-        let bytes = fs::read(dir.path().join(&file_name)).unwrap();
-        assert_eq!(body.sha256sum, hex::encode(Sha256::digest(bytes)));
+        assert_eq!(body.sha256sum, sha256_of(&dir.path().join(&file_name)));
         assert_eq!(body.md5sum, None);
         assert_eq!(body.sha512sum, None);
         assert_eq!(body.tags, None);

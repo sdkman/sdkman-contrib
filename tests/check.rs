@@ -9,9 +9,7 @@ use sdkman_contrib::receipt::{Receipt, write_receipt};
 use sdkman_contrib::request_path::{RequestPath, Timestamp};
 use sdkman_contrib::state_api::Answer;
 use serde_json::json;
-use sha2::{Digest, Sha256};
-use std::path::Path;
-use support::archives::write_zip;
+use support::archives::{sha256_of, write_zip};
 use support::fakes::{FakeArchives, FakeHops, FakeValidator};
 use support::fixtures::{GOOD_ENTRIES_1_2_0 as GOOD_ENTRIES, REGISTRATION, REGISTRATION_PATH};
 use support::repo::TempRepo;
@@ -220,10 +218,6 @@ impl Fixture {
     fn check(&self, validator: &FakeValidator, path: &str) -> sdkman_contrib::report::Report {
         run_check(&self.context(validator), path)
     }
-}
-
-fn sha256_of(file: &Path) -> String {
-    hex::encode(Sha256::digest(std::fs::read(file).unwrap()))
 }
 
 fn good_release() -> Fixture {
