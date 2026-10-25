@@ -6,7 +6,8 @@ use chrono::Utc;
 use clap::{Args, Parser, Subcommand};
 use sdkman_contrib::apply::{RunInfo, apply_queue, void_request};
 use sdkman_contrib::change_set::added_request;
-use sdkman_contrib::check::{CheckContext, run_check};
+use sdkman_contrib::check::{CheckContext, check_request};
+use sdkman_contrib::check_digests::CheckDigests;
 use sdkman_contrib::fetch::HttpArchiveSource;
 use sdkman_contrib::git::Git;
 use sdkman_contrib::report::{Report, ReportLine, Status};
@@ -61,6 +62,10 @@ struct CheckArgs {
     /// Write the markdown report to this path
     #[arg(long)]
     report: Option<PathBuf>,
+
+    /// Write the computed sha256 of every checked row to this path as JSON
+    #[arg(long)]
+    digests: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -123,6 +128,7 @@ fn check(args: CheckArgs) -> ExitCode {
     eprintln!("validating against {state_url}");
 
     let file = args.file.as_deref().map(normalise_path);
+    let mut digests: Option<CheckDigests> = None;
     let report = match select_file(&repo_root, file, args.base.as_deref()) {
         Ok(repo_path) => {
             let state = HttpState::new(&state_url);
@@ -133,7 +139,9 @@ fn check(args: CheckArgs) -> ExitCode {
                 validator: &state,
                 archives: &archives,
             };
-            run_check(&context, &repo_path)
+            let outcome = check_request(&context, &repo_path);
+            digests = Some(outcome.digests);
+            outcome.report
         }
         Err(message) => {
             let mut report = Report::default();
@@ -153,11 +161,22 @@ fn check(args: CheckArgs) -> ExitCode {
         eprintln!("cannot write {}: {error}", path.display());
         return ExitCode::FAILURE;
     }
+    if let (Some(path), Some(digests)) = (args.digests, digests)
+        && let Err(error) = write_digests(&path, &digests)
+    {
+        eprintln!("cannot write {}: {error}", path.display());
+        return ExitCode::FAILURE;
+    }
     if report.has_failures() {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
     }
+}
+
+fn write_digests(path: &Path, digests: &CheckDigests) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(digests).map_err(|error| error.to_string())?;
+    fs::write(path, json).map_err(|error| error.to_string())
 }
 
 fn apply(args: ApplyArgs) -> ExitCode {
