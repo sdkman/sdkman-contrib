@@ -4,7 +4,7 @@ use std::path::Path;
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::check::admit_timestamp;
-use crate::check_digests::{DigestError, DigestSource};
+use crate::check_digests::{DigestError, DigestRow, DigestSource};
 use crate::fetch::ArchiveSource;
 use crate::git::Git;
 use crate::load::load_request;
@@ -17,7 +17,7 @@ use crate::request::{Registration, Release, Request};
 use crate::request_path::RequestPath;
 use crate::state_api::{StateWriter, WriteError};
 use crate::state_body::{candidate_body, version_body};
-use crate::verify::verify_release;
+use crate::verify::{RowCheck, verify_release};
 
 const LOCAL_RUN: &str = "local";
 
@@ -256,16 +256,42 @@ fn apply_release(
     receipt: Receipt,
 ) -> Result<Receipt, ApplyError> {
     let checks = verify_release(release, archives);
+    let unread: Vec<String> = checks
+        .iter()
+        .filter(|row| row.digests.is_none())
+        .flat_map(|row| row_messages(release, row))
+        .collect();
+    if !unread.is_empty() {
+        return Err(ApplyError::Rejected(unread));
+    }
+    let reviewed = digests
+        .reviewed_digests(merge_commit)
+        .map_err(|error| match error {
+            DigestError::Missing => ApplyError::Blocked(vec![error.to_string()]),
+            DigestError::Failed(message) => ApplyError::Failed(message),
+        })?;
+    let changed: Vec<String> = checks
+        .iter()
+        .filter_map(|row| {
+            let subject = row_subject(&release.candidate, &row.version, &row.platform);
+            let reviewed_row = reviewed.rows.iter().find(|reviewed| {
+                reviewed.version == row.version && reviewed.platform == row.platform
+            });
+            match (reviewed_row, DigestRow::from_check(row)) {
+                (None, _) => Some(format!("{subject}: not among the reviewed digests")),
+                (Some(reviewed), Some(current)) if reviewed.sha256 != current.sha256 => {
+                    Some(format!("{subject}: archive changed since the check"))
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    if !changed.is_empty() {
+        return Err(ApplyError::Blocked(changed));
+    }
     let failures: Vec<String> = checks
         .iter()
-        .flat_map(|row| {
-            row.failures.iter().map(|failure| {
-                format!(
-                    "{}: {failure}",
-                    row_subject(&release.candidate, &row.version, &row.platform)
-                )
-            })
-        })
+        .flat_map(|row| row_messages(release, row))
         .collect();
     if !failures.is_empty() {
         return Err(ApplyError::Rejected(failures));
@@ -281,12 +307,6 @@ fn apply_release(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    digests
-        .reviewed_digests(merge_commit)
-        .map_err(|error| match error {
-            DigestError::Missing => ApplyError::Blocked(vec![error.to_string()]),
-            DigestError::Failed(message) => ApplyError::Failed(message),
-        })?;
     for body in &bodies {
         writer
             .post_version(body)
@@ -313,4 +333,12 @@ fn apply_release(
         }),
         ..receipt
     })
+}
+
+fn row_messages(release: &Release, row: &RowCheck) -> Vec<String> {
+    let subject = row_subject(&release.candidate, &row.version, &row.platform);
+    row.failures
+        .iter()
+        .map(|failure| format!("{subject}: {failure}"))
+        .collect()
 }
