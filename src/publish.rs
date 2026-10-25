@@ -1,5 +1,10 @@
 use std::fmt;
+use std::fs::File;
+use std::io;
+use std::path::Path;
 
+use crate::archive::{ArchiveFormat, inspect_archive};
+use crate::digest::HashingWriter;
 use crate::state_api::VendorState;
 use crate::state_body::VersionBody;
 
@@ -31,6 +36,93 @@ pub const RELEASE_PLATFORMS: [ReleasePlatform; 5] = [
         suffix: "linux-x64.tar.gz",
     },
 ];
+
+const RELEASE_CANDIDATE: &str = "contrib";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseArchiveError {
+    pub failures: Vec<String>,
+}
+
+impl fmt::Display for ReleaseArchiveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.failures.join("\n"))
+    }
+}
+
+impl std::error::Error for ReleaseArchiveError {}
+
+pub fn release_bodies(
+    dir: &Path,
+    version: &str,
+    url_base: &str,
+) -> Result<Vec<VersionBody>, ReleaseArchiveError> {
+    let mut bodies = Vec::new();
+    let mut failures = Vec::new();
+    for release_platform in &RELEASE_PLATFORMS {
+        let file_name = format!("{RELEASE_CANDIDATE}-{version}-{}", release_platform.suffix);
+        match release_body(dir, &file_name, version, url_base, release_platform) {
+            Ok(body) => bodies.push(body),
+            Err(reasons) => failures.extend(
+                reasons
+                    .into_iter()
+                    .map(|reason| format!("{file_name}: {reason}")),
+            ),
+        }
+    }
+    if failures.is_empty() {
+        Ok(bodies)
+    } else {
+        Err(ReleaseArchiveError { failures })
+    }
+}
+
+fn release_body(
+    dir: &Path,
+    file_name: &str,
+    version: &str,
+    url_base: &str,
+    release_platform: &ReleasePlatform,
+) -> Result<VersionBody, Vec<String>> {
+    let path = dir.join(file_name);
+    let format = if file_name.ends_with(".zip") {
+        ArchiveFormat::Zip
+    } else {
+        ArchiveFormat::TarGz
+    };
+    let sha256 = sha256_of(&path).map_err(|error| vec![format!("cannot read: {error}")])?;
+    let verdict = inspect_archive(
+        &path,
+        format,
+        RELEASE_CANDIDATE,
+        version,
+        release_platform.platform,
+    );
+    let problems: Vec<String> = verdict
+        .failures
+        .into_iter()
+        .chain(verdict.warnings)
+        .collect();
+    if !problems.is_empty() {
+        return Err(problems);
+    }
+    Ok(VersionBody {
+        candidate: RELEASE_CANDIDATE.to_owned(),
+        version: version.to_owned(),
+        platform: release_platform.platform.to_owned(),
+        url: format!("{}/{file_name}", url_base.trim_end_matches('/')),
+        md5sum: None,
+        sha256sum: sha256,
+        sha512sum: None,
+        tags: None,
+    })
+}
+
+fn sha256_of(path: &Path) -> io::Result<String> {
+    let mut writer = HashingWriter::new(io::sink());
+    io::copy(&mut File::open(path)?, &mut writer)?;
+    Ok(writer.finish().1.sha256)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishError {
