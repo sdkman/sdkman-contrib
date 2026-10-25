@@ -155,6 +155,103 @@ fn missing_digests_block() {
 }
 
 #[test]
+fn changed_archive_blocks() {
+    let dir = TempDir::new().unwrap();
+    let archives = good_archives(&dir, &["1.0.0"]);
+    let digests = FakeDigests::with_rows(vec![DigestRow {
+        sha256: "0".repeat(64),
+        ..reviewed_row("1.0.0", &tar_gz(&dir, "1.0.0.tar.gz", &GOOD_ENTRIES))
+    }]);
+    let writer = FakeWriter::default();
+    let error = apply_request(
+        &release(vec![("1.0.0", archive("1.0.0"))], None),
+        &writer,
+        &archives,
+        &digests,
+        commits(),
+        &run(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        ApplyError::Blocked(vec![
+            "jpx 1.0.0 LINUX_X64: archive changed since the check".to_owned()
+        ])
+    );
+    assert_eq!(writer.write_attempts(), 0);
+}
+
+#[test]
+fn row_missing_from_reviewed_digests_blocks() {
+    let dir = TempDir::new().unwrap();
+    let archives = good_archives(&dir, &["1.0.0", "1.1.0"]);
+    let digests = reviewed(&dir, &["1.0.0"]);
+    let writer = FakeWriter::default();
+    let request = release(
+        vec![("1.0.0", archive("1.0.0")), ("1.1.0", archive("1.1.0"))],
+        None,
+    );
+    let error =
+        apply_request(&request, &writer, &archives, &digests, commits(), &run()).unwrap_err();
+    assert_eq!(
+        error,
+        ApplyError::Blocked(vec![
+            "jpx 1.1.0 LINUX_X64: not among the reviewed digests".to_owned()
+        ])
+    );
+    assert_eq!(writer.write_attempts(), 0);
+}
+
+#[test]
+fn replaced_archive_without_bin_blocks() {
+    let dir = TempDir::new().unwrap();
+    let broken = tar_gz(
+        &dir,
+        "broken.tar.gz",
+        &[("jpx-1.0.0/", 0o755), ("jpx-1.0.0/README", 0o644)],
+    );
+    let archives = FakeArchives::default().serving(&url("1.0.0"), &broken);
+    let digests = reviewed(&dir, &["1.0.0"]);
+    let writer = FakeWriter::default();
+    let error = apply_request(
+        &release(vec![("1.0.0", archive("1.0.0"))], None),
+        &writer,
+        &archives,
+        &digests,
+        commits(),
+        &run(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        ApplyError::Blocked(vec![
+            "jpx 1.0.0 LINUX_X64: archive changed since the check".to_owned()
+        ])
+    );
+    assert_eq!(writer.write_attempts(), 0);
+}
+
+#[test]
+fn undownloadable_archive_stops_before_lookup() {
+    let archives = FakeArchives::default();
+    let digests = FakeDigests::missing();
+    let writer = FakeWriter::default();
+    let error = apply_request(
+        &release(vec![("1.0.0", archive("1.0.0"))], None),
+        &writer,
+        &archives,
+        &digests,
+        commits(),
+        &run(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, ApplyError::Rejected(_)));
+    assert!(error.to_string().contains("jpx 1.0.0 LINUX_X64: URL"));
+    assert_eq!(digests.lookups(), Vec::<String>::new());
+    assert_eq!(writer.write_attempts(), 0);
+}
+
+#[test]
 fn failed_lookup_stops_the_run() {
     let dir = TempDir::new().unwrap();
     let archives = good_archives(&dir, &["1.0.0"]);
@@ -214,7 +311,7 @@ fn undeclared_archive_without_bin_writes_nothing() {
         &[("jpx-1.0.0/", 0o755), ("jpx-1.0.0/README", 0o644)],
     );
     let archives = FakeArchives::default().serving(&url("1.0.0"), &broken);
-    let digests = FakeDigests::missing();
+    let digests = FakeDigests::with_rows(vec![reviewed_row("1.0.0", &broken)]);
     let writer = FakeWriter::default();
     let error = apply_request(
         &release(vec![("1.0.0", archive("1.0.0"))], None),
