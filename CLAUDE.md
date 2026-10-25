@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `src/main.rs` - the `contrib` CLI
 - `src/lib.rs` - the library the CLI and the tests share
 - `tests/*.rs` - integration tests; shared helpers in `tests/support/`
+- `.github/workflows/` - the GitHub workflows; `pull-requests.yml` holds no secrets
 
 ## Boundaries
 
@@ -26,4 +27,5 @@ Run these commands in this order. Work is done only when every command exits wit
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+nix run nixpkgs#actionlint -- -ignore 'unexpected key "queue"'
 ```
