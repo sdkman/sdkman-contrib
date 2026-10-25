@@ -11,6 +11,7 @@ use sdkman_contrib::check_digests::CheckDigests;
 use sdkman_contrib::fetch::HttpArchiveSource;
 use sdkman_contrib::git::Git;
 use sdkman_contrib::github::GitHubDigests;
+use sdkman_contrib::publish::{publish_release, release_bodies};
 use sdkman_contrib::report::{Report, ReportLine, Status};
 use sdkman_contrib::request_path::Kind;
 use sdkman_contrib::skeleton::{
@@ -34,6 +35,9 @@ enum Command {
     /// Write a request skeleton stamped with the current UTC time
     #[command(subcommand)]
     New(NewCommand),
+    /// Publish this version's five release archives to State as the vendor of `contrib`
+    #[command(hide = true)]
+    Publish(PublishArgs),
 }
 
 #[derive(Subcommand)]
@@ -80,11 +84,22 @@ struct ApplyArgs {
     reason: Option<String>,
 }
 
+#[derive(Args)]
+struct PublishArgs {
+    /// The URL the archives are downloadable from, without the file name
+    #[arg(long)]
+    url_base: String,
+
+    /// The directory holding the five `contrib-<version>-<platform>` archives
+    directory: PathBuf,
+}
+
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Check(args) => check(args),
         Command::Apply(args) => apply(args),
         Command::New(command) => new(command),
+        Command::Publish(args) => publish(args),
     }
 }
 
@@ -237,6 +252,42 @@ fn apply(args: ApplyArgs) -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn publish(args: PublishArgs) -> ExitCode {
+    let (Some(email), Some(password)) = (
+        non_empty_env("VENDOR_EMAIL"),
+        non_empty_env("VENDOR_PASSWORD"),
+    ) else {
+        eprintln!("missing VENDOR_EMAIL or VENDOR_PASSWORD");
+        return ExitCode::from(2);
+    };
+    let version = env!("CARGO_PKG_VERSION");
+    let bodies = match release_bodies(&args.directory, version, &args.url_base) {
+        Ok(bodies) => bodies,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let state_url = resolve_state_url(env::var("CONTRIB_STATE_URL").ok());
+    eprintln!("publishing to {state_url}");
+
+    let state = HttpState::with_credentials(&state_url, Credentials { email, password });
+    if let Err(message) = state.login() {
+        eprintln!("{message}");
+        return ExitCode::FAILURE;
+    }
+    match publish_release(&state, &bodies) {
+        Ok(()) => {
+            println!("published contrib {version}");
+            ExitCode::SUCCESS
         }
         Err(error) => {
             eprintln!("{error}");
