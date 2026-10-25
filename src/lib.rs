@@ -1,4 +1,5 @@
 pub mod archive;
+pub mod change_set;
 pub mod digest;
 pub mod fetch;
 pub mod listing;

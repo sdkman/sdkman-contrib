@@ -3,3 +3,4 @@
 pub mod archives;
 pub mod fake_state;
 pub mod fakes;
+pub mod repo;
