@@ -48,3 +48,18 @@ fn readme_examples_parse() {
         assert!(release.structure_errors().is_empty());
     }
 }
+
+#[test]
+fn readme_states_the_archive_rules() {
+    let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+        .expect("README.md is readable");
+
+    let archives = readme
+        .split("\n## ")
+        .find(|section| section.starts_with("Archives"))
+        .expect("README.md has an Archives section");
+
+    assert!(archives.contains("5 redirects"));
+    assert!(archives.contains("/releases/latest/"));
+    assert!(!archives.contains("answers a redirect"));
+}
