@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`sdkman-contrib` is a Rust crate with one binary, `contrib`. It checks and applies community contributions of candidates and versions, written as YAML requests under `requests/`, to the State API. The design is in [`specs/001-community-contributions.md`](specs/001-community-contributions.md). Read it before changing behaviour.
+`sdkman-contrib` is a Rust crate with one binary, `contrib`. It checks and applies community contributions of candidates and versions, written as YAML requests under `requests/`, to the State API. The design is in [`specs/001-community-contributions.md`](specs/001-community-contributions.md), amended by [`specs/002-review-follow-ups.md`](specs/002-review-follow-ups.md). Read both before changing behaviour.
 
 ## Layout
 
@@ -12,7 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `src/lib.rs` - the library the CLI and the tests share
 - `tests/*.rs` - integration tests; shared helpers in `tests/support/`
 - `.github/workflows/` - the GitHub workflows; `pull-requests.yml` holds no secrets
-- `.github/rulesets/main.json`, `scripts/protect-main.sh` - the ruleset of `main` and the script a maintainer runs once to apply it
+- `.github/rulesets/main.json`, `.github/rulesets/release-tags.json` - the rulesets of `main` and of the `v*` tags
+- `scripts/protect-main.sh` - applies and checks every ruleset in `.github/rulesets/`
 
 ## Boundaries
 
