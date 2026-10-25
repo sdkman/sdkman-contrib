@@ -3,6 +3,7 @@ pub mod change_set;
 pub mod check;
 pub mod digest;
 pub mod fetch;
+pub mod git;
 pub mod listing;
 pub mod load;
 pub mod receipt;
