@@ -1,8 +1,8 @@
 mod support;
 
 use sdkman_contrib::state_api::{
-    Answer, Credentials, DEFAULT_STATE_URL, HttpState, StateValidator, StateWriter, WriteError,
-    resolve_state_url,
+    Answer, Credentials, DEFAULT_STATE_URL, HttpState, StateValidator, StateWriter, VendorState,
+    WriteError, resolve_state_url,
 };
 use sdkman_contrib::state_body::{CandidateBody, VersionBody};
 use serde_json::{Value, json};
@@ -272,4 +272,68 @@ fn failed_relogin_after_401_is_a_login_error() {
         WriteError::Login("login failed: State answered 401".to_owned())
     );
     assert_eq!(state.paths(), vec!["/login", "/versions", "/login"]);
+}
+
+#[test]
+fn stable_version_reads_the_tag_route() {
+    let state = FakeState::answering(&[
+        (200, r#"{"candidate":"contrib","version":"0.2.0"}"#),
+        (404, ""),
+        (500, ""),
+    ]);
+    let reader = HttpState::new(&state.url);
+    assert_eq!(
+        reader.stable_version("contrib", "LINUX_X64").unwrap(),
+        Some("0.2.0".to_owned())
+    );
+    assert_eq!(reader.stable_version("contrib", "LINUX_X64").unwrap(), None);
+    assert!(matches!(
+        reader.stable_version("contrib", "LINUX_X64"),
+        Err(WriteError::Refused { status: 500, .. })
+    ));
+    let requests = state.requests();
+    assert_eq!(requests[0].method, "GET");
+    assert!(
+        requests[0]
+            .path
+            .starts_with("/versions/contrib/tags/stable?platform=LINUX_X64&_cb=")
+    );
+}
+
+#[test]
+fn has_version_reads_the_version_route() {
+    let state = FakeState::answering(&[(200, "{}"), (404, ""), (500, "")]);
+    let reader = HttpState::new(&state.url);
+    assert!(reader.has_version("contrib", "0.2.0", "MAC_ARM64").unwrap());
+    assert!(!reader.has_version("contrib", "0.2.0", "MAC_ARM64").unwrap());
+    assert!(matches!(
+        reader.has_version("contrib", "0.2.0", "MAC_ARM64"),
+        Err(WriteError::Refused { status: 500, .. })
+    ));
+    assert!(
+        state.requests()[0]
+            .path
+            .starts_with("/versions/contrib/0.2.0?platform=MAC_ARM64&_cb=")
+    );
+}
+
+#[test]
+fn reads_bypass_the_edge_cache() {
+    let state = FakeState::answering(&[(404, ""), (404, "")]);
+    let reader = HttpState::new(&state.url);
+    reader.stable_version("contrib", "LINUX_X64").unwrap();
+    reader.stable_version("contrib", "LINUX_X64").unwrap();
+    let paths = state.paths();
+    assert_ne!(paths[0], paths[1]);
+}
+
+#[test]
+fn unreachable_read_is_a_transport_error() {
+    let state = FakeState::answering(&[]);
+    let url = state.url.clone();
+    drop(state);
+    assert!(matches!(
+        HttpState::new(&url).has_version("contrib", "0.2.0", "LINUX_X64"),
+        Err(WriteError::Transport(_))
+    ));
 }

@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -57,6 +58,17 @@ pub trait StateValidator {
 pub trait StateWriter {
     fn post_candidate(&self, body: &CandidateBody) -> Result<(), WriteError>;
     fn post_version(&self, body: &VersionBody) -> Result<(), WriteError>;
+}
+
+pub trait VendorState: StateWriter {
+    fn stable_version(&self, candidate: &str, platform: &str)
+    -> Result<Option<String>, WriteError>;
+    fn has_version(
+        &self,
+        candidate: &str,
+        version: &str,
+        platform: &str,
+    ) -> Result<bool, WriteError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,6 +213,50 @@ impl HttpState {
     }
 }
 
+static CACHE_BUSTERS: AtomicU64 = AtomicU64::new(0);
+
+fn cache_buster() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let sequence = CACHE_BUSTERS.fetch_add(1, Ordering::Relaxed);
+    format!("{nanos}-{sequence}")
+}
+
+impl HttpState {
+    fn get_past_cache(&self, path_and_query: &str) -> Result<Answer, WriteError> {
+        let separator = if path_and_query.contains('?') {
+            '&'
+        } else {
+            '?'
+        };
+        let url = format!(
+            "{}{path_and_query}{separator}_cb={}",
+            self.base_url,
+            cache_buster()
+        );
+        let mut response = self
+            .agent
+            .get(&url)
+            .call()
+            .map_err(|e| WriteError::Transport(format!("{url} could not be reached: {e}")))?;
+        let status = response.status().as_u16();
+        let text = response
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| WriteError::Transport(format!("{url} answer could not be read: {e}")))?;
+        let body = serde_json::from_str(&text).unwrap_or(Value::Null);
+        Ok(Answer { status, body })
+    }
+}
+
+fn refused(answer: &Answer) -> WriteError {
+    WriteError::Refused {
+        status: answer.status,
+        messages: answer.messages(),
+    }
+}
+
 impl StateValidator for HttpState {
     fn validate_version(&self, body: &VersionBody) -> Result<Answer, String> {
         self.post("/validate/versions", body, None)
@@ -218,5 +274,43 @@ impl StateWriter for HttpState {
 
     fn post_version(&self, body: &VersionBody) -> Result<(), WriteError> {
         self.write("/versions", body, &[204])
+    }
+}
+
+impl VendorState for HttpState {
+    fn stable_version(
+        &self,
+        candidate: &str,
+        platform: &str,
+    ) -> Result<Option<String>, WriteError> {
+        let answer = self.get_past_cache(&format!(
+            "/versions/{candidate}/tags/stable?platform={platform}"
+        ))?;
+        match answer.status {
+            200 => answer
+                .body
+                .get("version")
+                .and_then(Value::as_str)
+                .map(|version| Some(version.to_owned()))
+                .ok_or_else(|| refused(&answer)),
+            404 => Ok(None),
+            _ => Err(refused(&answer)),
+        }
+    }
+
+    fn has_version(
+        &self,
+        candidate: &str,
+        version: &str,
+        platform: &str,
+    ) -> Result<bool, WriteError> {
+        let answer = self.get_past_cache(&format!(
+            "/versions/{candidate}/{version}?platform={platform}"
+        ))?;
+        match answer.status {
+            200 => Ok(true),
+            404 => Ok(false),
+            _ => Err(refused(&answer)),
+        }
     }
 }
