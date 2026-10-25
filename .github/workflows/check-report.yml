@@ -1,0 +1,60 @@
+name: Check Report
+
+on:
+  workflow_run:
+    workflows: ["Pull Requests"]
+    types:
+      - completed
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  check-report:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download check report
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: check-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Resolve pull request
+        id: pull-request
+        if: steps.download.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          pr_number=$(tr -d '[:space:]' < pr-number)
+          case "$pr_number" in
+            ''|*[!0-9]*) exit 0 ;;
+          esac
+          pr_head_sha=$(gh api "repos/$REPO/pulls/$pr_number" --jq .head.sha)
+          if [ "$pr_head_sha" != "$HEAD_SHA" ]; then
+            exit 0
+          fi
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+      - name: Post check report
+        if: steps.pull-request.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pull-request.outputs.number }}
+          MARKER: "<!-- contrib-check-report -->"
+        run: |
+          { echo "$MARKER"; cat report.md; } > comment.md
+          comment_id=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARKER\"))) | .id" \
+            | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$comment_id" -F body=@comment.md
+          else
+            gh api --method POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@comment.md
+          fi
