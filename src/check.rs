@@ -6,7 +6,7 @@ use crate::fetch::ArchiveSource;
 use crate::load::load_request;
 use crate::receipt::latest_applied;
 use crate::report::{Report, ReportLine, Status, row_line};
-use crate::request::{Registration, Release, Request};
+use crate::request::{LINUX_X64, Registration, Release, Request, UNIVERSAL};
 use crate::request_path::{RequestPath, check_timestamp};
 use crate::state_api::{Answer, StateValidator};
 use crate::state_body::{candidate_body, version_body};
@@ -83,6 +83,31 @@ fn check_release(context: &CheckContext, release: &Release, report: &mut Report)
         };
         report.push(row_line(&release.candidate, &row, &failures));
     }
+    if let Some(line) = unmovable_default_warning(release) {
+        report.push(line);
+    }
+}
+
+fn unmovable_default_warning(release: &Release) -> Option<ReportLine> {
+    let default = release.default.as_ref()?;
+    let version = release
+        .versions
+        .iter()
+        .find(|version| &version.version == default)?;
+    let movable = [UNIVERSAL, LINUX_X64]
+        .iter()
+        .any(|platform| version.platforms.contains_key(*platform));
+    if movable {
+        return None;
+    }
+    Some(ReportLine {
+        status: Status::Warn,
+        subject: format!("{} {default} default", release.candidate),
+        detail: format!(
+            "the default will not move without a {UNIVERSAL} or {LINUX_X64} row; \
+             State clears stable from other versions' {UNIVERSAL} rows, so a {UNIVERSAL} default is lost"
+        ),
+    })
 }
 
 fn state_failures(answer: Result<Answer, String>) -> Vec<String> {
