@@ -1,8 +1,10 @@
 pub mod archive;
 pub mod change_set;
+pub mod check;
 pub mod digest;
 pub mod fetch;
 pub mod listing;
+pub mod load;
 pub mod receipt;
 pub mod report;
 pub mod request;
