@@ -6,6 +6,7 @@ pub mod check_digests;
 pub mod digest;
 pub mod fetch;
 pub mod git;
+pub mod github;
 pub mod http;
 pub mod listing;
 pub mod load;
