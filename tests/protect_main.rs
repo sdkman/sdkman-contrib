@@ -42,6 +42,19 @@ fn committed() -> Value {
     })
 }
 
+fn release_tags() -> Value {
+    json!({
+        "name": "release-tags",
+        "target": "tag",
+        "enforcement": "active",
+        "conditions": { "ref_name": { "include": ["refs/tags/v*"], "exclude": [] } },
+        "rules": [{ "type": "creation" }, { "type": "deletion" }],
+        "bypass_actors": [
+            { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+        ]
+    })
+}
+
 fn live_copy_of(committed: &Value) -> Value {
     let mut live = committed.clone();
     live["id"] = json!(42);
@@ -63,13 +76,21 @@ impl Sandbox {
             fs::create_dir_all(dir).unwrap();
         }
         fs::write(scripts.join("protect-main.sh"), SCRIPT).unwrap();
-        fs::write(rulesets.join("main.json"), committed.to_string()).unwrap();
         let gh = stub_bin.join("gh");
         fs::write(&gh, STUB_GH).unwrap();
         fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
         let sandbox = Sandbox { root };
+        sandbox.add_ruleset("main.json", committed);
         sandbox.live_list(&json!([]));
         sandbox
+    }
+
+    fn add_ruleset(&self, file_name: &str, ruleset: &Value) {
+        fs::write(
+            self.root.path().join(".github/rulesets").join(file_name),
+            ruleset.to_string(),
+        )
+        .unwrap();
     }
 
     fn stub_dir(&self) -> PathBuf {
@@ -239,6 +260,93 @@ fn check_fails_on_a_differing_nested_parameter() {
         .code(1)
         .stderr(predicates::str::contains(
             "main differs from the live ruleset",
+        ));
+}
+
+#[test]
+fn check_fails_on_differing_enforcement() {
+    let sandbox = Sandbox::new(&committed());
+    let mut live = live_copy_of(&committed());
+    live["enforcement"] = json!("disabled");
+    sandbox.live_ruleset(&live);
+
+    sandbox
+        .run(&["--check"])
+        .code(1)
+        .stderr(predicates::str::contains(
+            "main differs from the live ruleset",
+        ));
+}
+
+#[test]
+fn check_fails_on_differing_conditions() {
+    let sandbox = Sandbox::new(&committed());
+    let mut live = live_copy_of(&committed());
+    live["conditions"]["ref_name"]["include"] = json!(["refs/heads/release"]);
+    sandbox.live_ruleset(&live);
+
+    sandbox
+        .run(&["--check"])
+        .code(1)
+        .stderr(predicates::str::contains(
+            "main differs from the live ruleset",
+        ));
+}
+
+#[test]
+fn check_fails_on_a_missing_bypass_actor() {
+    let sandbox = Sandbox::new(&committed());
+    let mut live = live_copy_of(&committed());
+    live["bypass_actors"].as_array_mut().unwrap().pop();
+    sandbox.live_ruleset(&live);
+
+    sandbox
+        .run(&["--check"])
+        .code(1)
+        .stderr(predicates::str::contains(
+            "main differs from the live ruleset",
+        ));
+}
+
+#[test]
+fn every_ruleset_file_is_applied() {
+    let sandbox = Sandbox::new(&committed());
+    sandbox.add_ruleset("release-tags.json", &release_tags());
+    sandbox.live_ruleset(&live_copy_of(&committed()));
+
+    sandbox.run(&[]).success();
+
+    let writes: Vec<String> = sandbox
+        .gh_calls()
+        .into_iter()
+        .filter(|call| call.contains("--method"))
+        .collect();
+    assert_eq!(writes.len(), 2, "{writes:?}");
+    assert!(
+        writes[0].contains("--method PUT repos/sdkman/sdkman-contrib/rulesets/42"),
+        "{writes:?}"
+    );
+    assert!(writes[0].ends_with("main.json"), "{writes:?}");
+    assert!(writes[1].contains("--method POST"), "{writes:?}");
+    assert!(writes[1].ends_with("release-tags.json"), "{writes:?}");
+}
+
+#[test]
+fn check_names_each_drifted_ruleset() {
+    let sandbox = Sandbox::new(&committed());
+    sandbox.add_ruleset("release-tags.json", &release_tags());
+    let mut live = live_copy_of(&committed());
+    live["enforcement"] = json!("evaluate");
+    sandbox.live_ruleset(&live);
+
+    sandbox
+        .run(&["--check"])
+        .code(1)
+        .stderr(predicates::str::contains(
+            "main differs from the live ruleset",
+        ))
+        .stderr(predicates::str::contains(
+            "release-tags is absent from the live repository",
         ));
 }
 
