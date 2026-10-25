@@ -89,6 +89,6 @@ fn state_failures(answer: Result<Answer, String>) -> Vec<String> {
     match answer {
         Ok(answer) if answer.passed() => Vec::new(),
         Ok(answer) => answer.messages(),
-        Err(error) => vec![format!("State could not be reached: {error}")],
+        Err(error) => vec![format!("State call failed: {error}")],
     }
 }

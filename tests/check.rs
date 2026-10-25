@@ -348,7 +348,7 @@ fn transport_error_is_one_state_failure() {
     assert!(
         report
             .render_text()
-            .contains("State could not be reached: connection refused")
+            .contains("State call failed: connection refused")
     );
 }
 
