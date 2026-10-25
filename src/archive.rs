@@ -31,6 +31,11 @@ pub fn check_url(url: &str, candidate: &str, version: &str) -> (Option<ArchiveFo
     if parsed.scheme() != "https" {
         verdict.failures.push("URL must use https".to_owned());
     }
+    if parsed.path().contains("/releases/latest/") {
+        verdict
+            .failures
+            .push("URL must name a fixed release, not /releases/latest/".to_owned());
+    }
     let file_name = parsed
         .path_segments()
         .and_then(|mut segments| segments.next_back())
@@ -256,6 +261,31 @@ mod tests {
     fn reports_scheme_and_extension_together() {
         let (_, verdict) = check_url("ftp://example.org/jpx-1.2.0.rar", "jpx", "1.2.0");
         assert_eq!(verdict.failures.len(), 2);
+    }
+
+    #[test]
+    fn rejects_latest_release_download() {
+        let (format, verdict) = check_url(
+            "https://github.com/jpx/jpx/releases/latest/download/jpx-1.2.0.zip",
+            "jpx",
+            "1.2.0",
+        );
+        assert_eq!(format, Some(ArchiveFormat::Zip));
+        assert_eq!(
+            verdict.failures,
+            vec!["URL must name a fixed release, not /releases/latest/"]
+        );
+    }
+
+    #[test]
+    fn accepts_fixed_release_download() {
+        let (format, verdict) = check_url(
+            "https://github.com/jpx/jpx/releases/download/v1/jpx-1.2.0.zip",
+            "jpx",
+            "1.2.0",
+        );
+        assert_eq!(format, Some(ArchiveFormat::Zip));
+        assert_eq!(verdict, Verdict::default());
     }
 
     #[test]
