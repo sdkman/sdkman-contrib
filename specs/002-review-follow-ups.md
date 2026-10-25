@@ -21,18 +21,39 @@ and Windows x64. Every contributor is a SDKMAN user, so the tool reaches them th
 channel they already have, and an upgrade brings them the check's latest rules. They need no
 Rust toolchain, no clone of the repo and no prior knowledge of GitHub releases.
 
-**Every release of `contrib` reaches SDKMAN on its own.** Tagging a release publishes it as a
-new `contrib` version in State, for every platform above, and makes it the default. It is
-published as a vendor publishes its own candidate, through State's vendor role, never through
-a `contrib` request. So `contrib` is never listed in `contrib-candidates.txt`, and a broken
-`contrib` can never block its own fix. Each published archive is well formed by SDKMAN's own
-rules: one `contrib-<version>` base directory holding `bin/contrib`.
+**Every release of `contrib` reaches SDKMAN on its own.** A maintainer cuts a release with
+`cargo release` on `main`. It sets the `version` in `Cargo.toml`, commits, tags the commit
+`v<version>` and pushes, and the tag push publishes it as a new `contrib` version in State, for
+every platform above, and makes it the default. Only maintainers may create `v*` tags, a tag
+ruleset enforces that, and the `Release` workflow fails before publishing unless the tagged
+commit is on `main`. The vendor credential lives in a GitHub environment that only `v*` tags
+can deploy from. It is published as a vendor publishes its own candidate, through State's
+vendor role, never through a `contrib` request. So `contrib` is never listed in
+`contrib-candidates.txt`, and a broken `contrib` can never block its own fix. Each published
+archive is well formed by SDKMAN's own rules: one `contrib-<version>` base directory holding
+`bin/contrib`. Linux and macOS archives are `.tar.gz` and Windows is `.zip`, so `sdkman-hooks`
+must serve `contrib` its tarball post-install hook on Linux and macOS before the first release.
+
+**`contrib` is registered once, by hand, before its first release.** A State admin registers
+it with `POST /admin/candidates`:
+
+```json
+{
+  "candidate": "contrib",
+  "name": "SDKMAN Contrib",
+  "description": "SDKMAN Contrib is the command-line tool for contributing candidates and versions to SDKMAN, for SDKs that rely on community contributions rather than being published by their own vendors. It writes and checks the YAML requests that a pull request adds, so a contributor sees locally the same verdict that the pull request check gives.",
+  "website_url": "https://github.com/sdkman/sdkman-contrib"
+}
+```
+
+The admin also creates a vendor account scoped to `contrib`. Only the `Release` workflow holds
+that account's credential. This amends 001 rule 12.
 
 **The README tells a contributor how to install it.** Installing through SDKMAN is the
-recommended path, because it gives the contributor `contrib new` and `contrib check` before
-they push. The README also names the GitHub release binaries as a fallback for anyone who
-cannot use SDKMAN. A hand-written file stays valid, but the README no longer presents
-installing as an optional extra.
+recommended path: run `sdk update`, open a new terminal, then run `sdk install contrib`. It
+gives the contributor `contrib new` and `contrib check` before they push. The README also names
+the GitHub release binaries as a fallback for anyone who cannot use SDKMAN. A hand-written file
+stays valid, but the README no longer presents installing as an optional extra.
 
 *Side note for the README: a contributor who already has a Rust toolchain can build from
 source with `cargo install --git https://github.com/sdkman/sdkman-contrib`. The README
@@ -57,15 +78,31 @@ request PR that also changes the tool, a workflow or anything else outside its o
 still fails, and changing the tool in the same PR cannot turn that failure, or any other,
 into a pass.
 
-**What is applied is what was reviewed.** The archive the apply downloads must be the same
-archive the check downloaded for the reviewed PR, byte for byte, whether or not the
-contributor declared a checksum. If an archive changed between the check and the apply, that
-request fails, writes nothing to State, and stays pending for a maintainer to void or for a
-corrected request to supersede.
+Request PRs are judged by a `pull_request_target` job. It builds `contrib` from the base
+commit, reads the PR head only as data, and posts its verdict as the commit status
+`contrib/request-check`, with success for a PR that touches neither `requests/` nor
+`.applied/`. The ruleset requires that status, and a fork PR's read-only token cannot post
+it. Code PRs keep a separate `pull_request` job for build and tests. Check Report and the
+failure alert accept the new event. This amends 001's "Both run under the one
+`Pull Requests` workflow".
 
-**A default that can never take effect is flagged.** A release whose `default` version has
-neither a `UNIVERSAL` nor a `LINUX_X64` row gets a `WARN` on the check, so the reviewer sees it
-instead of having to spot it.
+**What is applied is what was reviewed.** The archive the apply downloads must be the same
+archive the check downloaded for the reviewed PR, byte for byte, whether or not the contributor
+declared a checksum. If an archive changed between the check and the apply, that request fails,
+writes nothing to State, and stays pending for a maintainer to void. The apply records the
+failure and goes on to the requests ordered after it, so a corrected request, or one for
+another candidate, still applies.
+
+The check writes each row's computed sha256 to a `digests.json` artifact of its run. The
+apply reads that artifact, through the Actions API with `actions: read`, from the last
+successful check run on the PR head commit that merged. A missing artifact counts as a
+mismatch. This amends 001's "The apply trusts nothing from the PR run" for these digests
+only.
+
+**A default that will not move is flagged.** A release whose `default` version has neither a
+`UNIVERSAL` nor a `LINUX_X64` row gets a `WARN`. The WARN says the default will not move, and
+that State will clear `stable` from every other version's `UNIVERSAL` row, which leaves a
+candidate whose default is a `UNIVERSAL` version with no default at all.
 
 **The committed ruleset is the live ruleset.** `.github/rulesets/main.json` describes `main`'s
 protection as it is actually applied, including the GitHub App that may bypass it. It holds no
@@ -76,20 +113,29 @@ placeholder that has to be filled in elsewhere.
 1. **Every contributor platform is covered.** Linux x64, Linux ARM64, macOS x64, macOS ARM64
    and Windows x64 each get a `contrib` version in State and a binary on GitHub with every
    release. A platform without one is not listed as supported.
-2. **Install steps are verifiable.** The README shows how to confirm the install worked, for
-   example by running `contrib` and seeing its version.
+2. **Install steps are verifiable.** The README shows how to confirm the install worked, by
+   running `contrib --version`, which prints `contrib <version>`. `<version>` is the `version`
+   in `Cargo.toml`, and the release reads it from there: the tag is `v<version>`, and the
+   State version and the `contrib-<version>` base directory are `<version>`.
 3. **`contrib` publishes itself as a vendor.** Its releases reach State through the vendor
    role, and `contrib` is never listed in `contrib-candidates.txt`.
-4. **A release reaches SDKMAN only when it is complete.** A release that cannot publish every
-   platform shows as a failed release, and the previous default stays the default.
+4. **A release reaches SDKMAN only when it is complete.** A release posts all five rows
+   without tags, then tags them `stable`, with `LINUX_X64` last. If any step fails before that
+   last tag, the workflow deletes the rows it posted for that version (the vendor role may
+   delete its own candidate's versions) and fails. The default moves only with the last tag.
 5. **Redirect chains stay on `https`.** A chain with any non-`https` hop fails the URL rule.
-   A chain that never ends in a `200` fails it too, as does one longer than a sane bound.
-6. **The final file is what the archive rules judge.** The `.zip` or `.tar.gz` rule, the
-   archive format, the base directory and `bin/` rules all apply to the archive at the end of
-   the chain.
+   A chain that never ends in a `200` fails it too, as does one with more than 5 redirects. A
+   written URL whose path contains `/releases/latest/` fails the URL rule. The written URL
+   must name a fixed release, such as `/releases/download/<tag>/<file>`.
+6. **The URL as written names the archive; the final file is what the archive rules judge.**
+   The URL in the request must end in `.zip` or `.tar.gz`, and that extension sets the expected
+   format. The archive format, the base directory and `bin/` rules apply to the file at the
+   end of the chain.
 7. **State receives the URL as written.** A redirect is never resolved into the row.
-8. **The check runs trusted code.** No file added or changed by a PR is executed, built or
-   loaded while checking that PR's request.
+8. **The check runs trusted code.** No file added or changed by a PR is executed or built,
+   and no workflow, build or tool configuration from the PR is used, while checking that PR's
+   request. The check reads the PR only as data: its change set and the one request file it
+   adds.
 9. **A changed archive blocks its request.** A mismatch between the archive seen at check
    time and at apply time fails the apply for that request before anything for it is written.
 10. **An unreachable default only warns.** It never fails the check, because State, not this
@@ -101,13 +147,13 @@ placeholder that has to be filled in elsewhere.
 - Changing what State stores for a URL.
 - Updating `contrib` automatically on a contributor's machine.
 - Publishing `contrib` to crates.io.
-- Any change to how the apply orders, retries or voids requests.
 
 ## Acceptance Criteria
 
-- [ ] `sdk install contrib` installs a working `contrib` on Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64, and `sdk upgrade contrib` moves to a newer release
-- [ ] Tagging a release publishes it to State through the vendor role as the new default `contrib` version for all five platforms, with no manual step
+- [ ] On a SDKMAN installed before `contrib` was registered, `sdk update` followed by `sdk install contrib` installs a working `contrib` on Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64, and `sdk upgrade contrib` moves to a newer release
+- [ ] After that one-time setup, a `cargo release` on `main` publishes it to State through the vendor role as the new default `contrib` version for all five platforms, with no manual step
 - [ ] Every published `contrib` archive passes SDKMAN's well-formed archive rules
+- [ ] `sdk install contrib` succeeds against the live `sdkman-hooks` on all five platforms
 - [ ] `contrib` is not listed in `contrib-candidates.txt`
 - [ ] A release that fails to publish any platform leaves the previous default in place and shows as failed
 - [ ] Each release also carries a working binary per platform on GitHub
@@ -116,9 +162,10 @@ placeholder that has to be filled in elsewhere.
 - [ ] The README and the releases can be read by someone outside the `sdkman` organisation
 - [ ] A request whose archive URL is a GitHub release download passes the URL rule, and the archive rules judge the downloaded file
 - [ ] A redirect chain with a non-`https` hop, no final `200`, or no end fails the check
+- [ ] A chain of 5 `https` redirects ending in `200` passes, and a chain of 6 fails
 - [ ] The row written to State carries the URL as the contributor wrote it
 - [ ] A request PR that also changes `contrib`'s code cannot make its own check pass, and still fails for touching files outside its request
 - [ ] No code from a PR is executed while checking that PR's request
 - [ ] An archive that changed between the check and the apply fails the apply for that request, nothing for it is written, and it stays pending
 - [ ] A release whose `default` version has neither a `UNIVERSAL` nor a `LINUX_X64` row gets a `WARN`, and the check still passes
-- [ ] `.github/rulesets/main.json` names the real bypass App and matches `main`'s live protection
+- [ ] `scripts/protect-main.sh` creates the `main` ruleset if it is absent and otherwise updates it with `PUT`. `scripts/protect-main.sh --check` exits non-zero when the live ruleset's `conditions`, `rules` or `bypass_actors` differ from `main.json`, and it exits zero against the live repository
