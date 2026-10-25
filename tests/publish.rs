@@ -1,12 +1,11 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
 
 use sdkman_contrib::publish::{PublishError, RELEASE_PLATFORMS, publish_release, release_bodies};
 use sdkman_contrib::state_body::VersionBody;
 use sha2::{Digest, Sha256};
-use support::archives::{write_tar_gz, write_zip};
+use support::archives::{write_release, write_release_archive};
 use support::fakes::FakeVendorState;
 use tempfile::TempDir;
 
@@ -183,39 +182,10 @@ fn rows_post_without_tags() {
 
 const URL_BASE: &str = "https://github.com/sdkman/sdkman-contrib/releases/download/v1.1.0";
 
-fn write_release(dir: &Path, base_directory: &str) {
-    for release_platform in &RELEASE_PLATFORMS {
-        write_release_archive(dir, release_platform.suffix, base_directory);
-    }
-}
-
-fn write_release_archive(dir: &Path, suffix: &str, base_directory: &str) {
-    let path = dir.join(format!("contrib-{VERSION}-{suffix}"));
-    let binary = if suffix.ends_with(".zip") {
-        "contrib.exe"
-    } else {
-        "contrib"
-    };
-    let entries = [
-        (format!("{base_directory}/"), 0o755),
-        (format!("{base_directory}/bin/"), 0o755),
-        (format!("{base_directory}/bin/{binary}"), 0o755),
-    ];
-    let entries: Vec<(&str, u32)> = entries
-        .iter()
-        .map(|(name, mode)| (name.as_str(), *mode))
-        .collect();
-    if suffix.ends_with(".zip") {
-        write_zip(&path, &entries);
-    } else {
-        write_tar_gz(&path, &entries);
-    }
-}
-
 #[test]
 fn reads_five_good_archives() {
     let dir = TempDir::new().unwrap();
-    write_release(dir.path(), "contrib-1.1.0");
+    write_release(dir.path(), VERSION, "contrib-1.1.0");
 
     let bodies = release_bodies(dir.path(), VERSION, &format!("{URL_BASE}/")).unwrap();
 
@@ -237,7 +207,7 @@ fn reads_five_good_archives() {
 #[test]
 fn missing_archive_fails() {
     let dir = TempDir::new().unwrap();
-    write_release(dir.path(), "contrib-1.1.0");
+    write_release(dir.path(), VERSION, "contrib-1.1.0");
     fs::remove_file(dir.path().join("contrib-1.1.0-windows-x64.zip")).unwrap();
 
     let error = release_bodies(dir.path(), VERSION, URL_BASE).unwrap_err();
@@ -252,9 +222,9 @@ fn missing_archive_fails() {
 #[test]
 fn wrong_base_directory_fails() {
     let dir = TempDir::new().unwrap();
-    write_release(dir.path(), "contrib-1.1.0");
-    write_release_archive(dir.path(), "macos-arm64.tar.gz", "contrib-9.9.9");
-    write_release_archive(dir.path(), "linux-x64.tar.gz", "contrib");
+    write_release(dir.path(), VERSION, "contrib-1.1.0");
+    write_release_archive(dir.path(), VERSION, "macos-arm64.tar.gz", "contrib-9.9.9");
+    write_release_archive(dir.path(), VERSION, "linux-x64.tar.gz", "contrib");
 
     let error = release_bodies(dir.path(), VERSION, URL_BASE).unwrap_err();
 
