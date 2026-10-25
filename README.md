@@ -150,7 +150,7 @@ versions:
 
 A `default` that is not one of the versions in the same request fails the check. Repeat every platform you want to keep, since a re-posted version replaces its rows whole.
 
-A default needs a `UNIVERSAL` or a `LINUX_X64` row, or it never becomes the default. The reviewing maintainer catches that case.
+A default needs a `UNIVERSAL` or a `LINUX_X64` row, or it never becomes the default. The check warns about it.
 
 ## Archives
 
