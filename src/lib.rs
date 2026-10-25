@@ -1,3 +1,4 @@
+pub mod digest;
 pub mod listing;
 pub mod receipt;
 pub mod request;
