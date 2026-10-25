@@ -19,7 +19,7 @@ jobs:
       - name: Download check report
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: check-report
           run-id: ${{ github.event.workflow_run.id }}
