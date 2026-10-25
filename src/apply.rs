@@ -8,7 +8,8 @@ use crate::fetch::ArchiveSource;
 use crate::git::Git;
 use crate::load::load_request;
 use crate::receipt::{
-    Receipt, ReceiptRow, RegisteredMetadata, StableTag, pending_requests, write_receipt,
+    Receipt, ReceiptError, ReceiptRow, RegisteredMetadata, StableTag, pending_requests,
+    write_receipt,
 };
 use crate::report::row_subject;
 use crate::request::{Registration, Release, Request};
@@ -51,6 +52,7 @@ impl RunInfo {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApplyError {
     Rejected(Vec<String>),
+    Failed(String),
     Write {
         subject: String,
         error: WriteError,
@@ -65,6 +67,7 @@ impl fmt::Display for ApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rejected(messages) => f.write_str(&messages.join("; ")),
+            Self::Failed(message) => f.write_str(message),
             Self::Write { subject, error } => write!(f, "{subject}: {error}"),
             Self::Request { path, cause } => write!(f, "{path}: {cause}"),
         }
@@ -82,7 +85,10 @@ pub fn apply_queue(
 ) -> Result<Vec<String>, ApplyError> {
     let pending = pending_requests(repo_root).map_err(|error| ApplyError::Request {
         path: "requests".to_owned(),
-        cause: Box::new(rejected(error)),
+        cause: Box::new(match error {
+            ReceiptError::Naming { .. } => rejected(error),
+            _ => failed(error),
+        }),
     })?;
     let mut applied = Vec::new();
     for pending_path in pending {
@@ -108,7 +114,7 @@ fn apply_pending(
 ) -> Result<(), ApplyError> {
     let (path, request) = load_request(repo_root, repo_path).map_err(ApplyError::Rejected)?;
     admit_timestamp(repo_root, &path, Utc::now()).map_err(rejected)?;
-    let commit = git.added_in(repo_path).map_err(rejected)?;
+    let commit = git.added_in(repo_path).map_err(failed)?;
     let receipt = apply_request(&request, writer, archives, &commit, run)?;
     record_receipt(repo_root, git, &path, &receipt, "record")
 }
@@ -140,7 +146,7 @@ fn void_pending(
     if repo_root.join(path.receipt_path()).exists() {
         return Err(rejected("already has a receipt"));
     }
-    let commit = git.added_in(repo_path).map_err(rejected)?;
+    let commit = git.added_in(repo_path).map_err(failed)?;
     let receipt = Receipt {
         voided: Some(reason.to_owned()),
         ..blank_receipt(run, &commit)
@@ -155,12 +161,12 @@ fn record_receipt(
     receipt: &Receipt,
     verb: &str,
 ) -> Result<(), ApplyError> {
-    write_receipt(repo_root, path, receipt).map_err(rejected)?;
+    write_receipt(repo_root, path, receipt).map_err(failed)?;
     git.commit_and_push(
         &path.receipt_path(),
         &format!("chore(apply): {verb} {}", path.repo_path()),
     )
-    .map_err(rejected)
+    .map_err(failed)
 }
 
 fn blank_receipt(run: &RunInfo, commit: &str) -> Receipt {
@@ -173,6 +179,10 @@ fn blank_receipt(run: &RunInfo, commit: &str) -> Receipt {
         register: None,
         voided: None,
     }
+}
+
+fn failed(error: impl fmt::Display) -> ApplyError {
+    ApplyError::Failed(error.to_string())
 }
 
 fn rejected(error: impl fmt::Display) -> ApplyError {

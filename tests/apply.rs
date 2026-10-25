@@ -550,3 +550,24 @@ fn void_refuses_missing_request() {
     assert!(error.to_string().contains("no such request"), "{error}");
     assert!(!has_receipt(&repo, JPX_RELEASE));
 }
+
+#[test]
+fn void_of_an_uncommitted_request_is_a_failure_not_a_rejection() {
+    let (repo, _) = queue_repo(&[]);
+    repo.write(JPX_RELEASE, "candidate: jpx\n");
+
+    let error = void_request(
+        repo.path(),
+        &Git::new(repo.path()),
+        &run(),
+        JPX_RELEASE,
+        "oops",
+    )
+    .unwrap_err();
+
+    let ApplyError::Request { cause, .. } = error else {
+        panic!("expected a request error, got {error}");
+    };
+    assert!(matches!(*cause, ApplyError::Failed(_)), "{cause:?}");
+    assert!(!has_receipt(&repo, JPX_RELEASE));
+}
