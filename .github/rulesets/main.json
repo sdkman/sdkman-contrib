@@ -24,7 +24,8 @@
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "pull-request" }
+          { "context": "pull-request" },
+          { "context": "contrib/request-check" }
         ]
       }
     },
