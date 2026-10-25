@@ -52,9 +52,11 @@ blocks every request ordered after it until it succeeds or a maintainer voids it
 keeps a release from landing before the registration it depends on.
 
 **A maintainer can retry or void.** `Apply` also runs on `workflow_dispatch`, which
-retries the queue. Its optional `void` input names one pending request. The bot commits
+retries the queue. Its optional `void` input names one pending request, and its optional
+`reason` input says why; an empty reason records `voided by <actor>`. The bot commits
 that request's receipt with `voided: <reason>` and no `rows` or `tag`, and writes nothing
-to State. A voided request counts as applied.
+to State. A voided request counts as applied. *(Assumption, planning pass 2026-10-24: the
+reason needs an input of its own.)*
 
 **Applying is safe to repeat.** Every write is an upsert, so re-running a request that half
 applied re-does the parts already applied without changing anything, then finishes the rest.
@@ -172,7 +174,10 @@ request writes.
    candidate whose vendor publishes through neither State's vendor role nor the Vendor API
    (`vendor-release`). Any request naming a candidate not on it fails the check, so a vendor
    remains the only writer of its candidates. A maintainer adds a new candidate to the list
-   before its registration PR.
+   before its registration PR. The list ships empty, and a maintainer lists each open
+   candidate, existing ones included, before its first request. *(Assumption, planning pass
+   2026-10-25: nothing in the workspace records which candidates a vendor publishes, so none
+   is opened by guess.)*
 4. **Nothing is deleted or hidden, for now.** No request kind deletes a version or a
    candidate; a maintainer does that directly. A request can overwrite a version (a new URL or
    checksum) by posting it again, but never remove one. State's community role already
@@ -180,7 +185,9 @@ request writes.
 5. **Unknown fields are rejected.** Parsing is strict, so a typo fails the check and is
    never silently ignored. Every value is its scalar's exact text, so `version: 8.10` is
    `8.10`. A block-scalar description loses its trailing newline and is otherwise posted as
-   written.
+   written. A repeated key or version, an empty `versions` list and a version without
+   platforms fail the check too. *(Assumption, planning pass 2026-10-24: strict parsing
+   refuses them rather than guess which entry wins.)*
 6. **`UNIVERSAL` excludes every other platform for one version.** A version is either one
    universal archive or a set of platform archives, never both.
 7. **Every archive is downloaded, and every checksum is verified against it.** A request may
@@ -229,8 +236,11 @@ The check validates only the request the PR adds. It:
 3. downloads every archive, applies rules 6 to 8, and computes each archive's sha256;
 4. posts each body the apply will post, computed sha256 included, to its State validation
    twin (one per row for a release) and collects every answer. Only `204` passes: any other
-   answer, a `400`, a `404` from a missing route, or a server error, fails the check;
-5. writes a report listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched, to the job summary and as a run artifact. A fork PR's token is read-only, so the check cannot comment itself; the `Check Report` workflow posts the report as one PR comment.
+   answer, a `400`, a `404` from a missing route, or a server error, fails the check. A row
+   whose archive could not be downloaded has no sha256 to send, so it is `FAIL` without a
+   call. *(Assumption, planning pass 2026-10-24: the apply could never post that row
+   either.)*;
+5. writes a report listing each row as `OK`, `WARN` or `FAIL`, with its checksums and whether each declared one matched, to the job summary and as a run artifact. A fork PR's token is read-only, so the check cannot comment itself; the `Check Report` workflow posts the report as one PR comment, and each later run updates that comment in place. *(Assumption, planning pass 2026-10-24: one comment per PR, never one per push.)*
 
 ```
 FAIL  jpx 1.2.0 LINUX_X64    no bin/ under jpx-1.2.0/
@@ -245,6 +255,13 @@ the reviewer.
 
 For each pending request, in file-name order:
 
+- **First:** re-reads the request under the check's rules that need no PR: the file name
+  pattern and its timestamp guard (rule 1), strict parsing, the path match, java,
+  `contrib-candidates.txt`, and rules 6 and 10. A request that breaks one fails here,
+  before anything is written. *(Assumption, planning pass 2026-10-24: the apply trusts
+  nothing from the PR run, so it re-checks these too. Amended 2026-10-25 to include the
+  timestamp guard: a receipt lands only after its apply finishes, so a back-dated request
+  can pass the check and merge while a later request for its candidate is still applying.)*
 - **Registration:** registers or updates the candidate.
 - **Release:** downloads each archive again, verifies every declared checksum against it
   (rule 7), and re-runs the archive rules (rules 6 and 8). The apply trusts nothing from the
@@ -322,11 +339,21 @@ $ contrib new release jpx 1.2.0 --platforms LINUX_X64,MAC_ARM64
 wrote requests/jpx/20261014T094057Z-release-1.2.0.yaml
 ```
 
+CI runs `contrib check --base <rev>`, which takes the file from the PR's changes against
+`<rev>` and so also performs step 1. A local run names the file and skips step 1.
+*(Assumption, planning pass 2026-10-24: step 1 needs the PR's base, which only CI has.)*
+A local run takes the file as the shell writes it, so `./requests/...` and Windows
+`.\requests\...` both work. *(Assumption, planning pass 2026-10-25: a contributor passes
+the path their shell completes, and Windows shells complete with `\`.)*
+
 A contributor never has to install the binary: a correctly named, hand-written file is just
 as good. Pre-built binaries are published with each release for those who want it. The receipts are committed by a
 dedicated `sdkman-contrib` GitHub App, the only actor allowed to skip `main`'s PR
 requirement. GitHub cannot limit that to one folder; the limit is `contrib apply`, the only
-code that pushes with the App, which only adds files under `.applied/`.
+code that pushes with the App, which only adds files under `.applied/`. The repo commits
+`main`'s protection as a ruleset, with a script that applies it and names the App as its only
+bypass actor. *(Assumption, planning pass 2026-10-25: no automated run changes repository
+settings, so a maintainer runs the script once the App exists.)*
 
 ## GitHub workflows
 
@@ -337,7 +364,7 @@ elsewhere.
 | Workflow | Trigger | Job |
 |---|---|---|
 | `Pull Requests` | every PR | runs `contrib check` on a request PR, the Rust build and tests on any other; no secrets |
-| `Apply` | push to `main`, ignoring pushes that only touch `.applied/`; `workflow_dispatch`, with an optional `void` input | runs `contrib apply`, one run at a time, never cancelled; holds the State credential and the App token |
+| `Apply` | push to `main`, ignoring pushes that only touch `.applied/`; `workflow_dispatch`, with optional `void` and `reason` inputs | runs `contrib apply`, one run at a time, never cancelled; holds the State credential and the App token |
 | `Release` | a version tag | builds and publishes the `contrib` binaries |
 | `Workflow Failure Alert` | `workflow_run` of any workflow on `main` | `reusable-workflow-failure-alert.yml`: a failed apply notifies the maintainer through the shared failure alert; `Release` runs on tags, outside the alert's `main` scope, and shows its failure on its own run only |
 | `Triage: Issues, Comments, PRs` | issue, comment or PR opened | `reusable-triage-events.yml` |
