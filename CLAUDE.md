@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Test servers listen on loopback only (`127.0.0.1`). No test reaches a real host, including `state.sdkman.io`.
 - Tests that need git build a temporary repository. They never touch this repository.
-- Never push, switch branches or rewrite Git history from a test or a script.
+- A test may push only to a temporary bare repository it created. Never push, switch branches or rewrite Git history from a script.
 
 ## Verification gate
 

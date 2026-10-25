@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       void:
-        description: "Pending request path to void instead of applying"
+        description: "Pending request path to void before the queue applies"
         required: false
         type: string
       reason:
