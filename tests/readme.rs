@@ -63,3 +63,21 @@ fn readme_states_the_archive_rules() {
     assert!(archives.contains("/releases/latest/"));
     assert!(!archives.contains("answers a redirect"));
 }
+
+#[test]
+fn readme_states_the_review_rules() {
+    let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+        .expect("README.md is readable");
+
+    let section = |title: &str| {
+        readme
+            .split("\n#")
+            .map(|part| part.trim_start_matches('#'))
+            .find(|part| part.trim_start().starts_with(title))
+            .unwrap_or_else(|| panic!("README.md has a {title} section"))
+    };
+
+    assert!(section("Checksums").contains("byte for byte"));
+    assert!(section("The check on your PR").contains("never code from your PR"));
+    assert!(!readme.contains("only thing that pins"));
+}
