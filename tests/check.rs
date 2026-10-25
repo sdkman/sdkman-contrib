@@ -2,6 +2,7 @@ mod support;
 
 use chrono::{DateTime, Utc};
 use sdkman_contrib::check::{CheckContext, admit_timestamp, run_check};
+use sdkman_contrib::fetch::ArchiveSource;
 use sdkman_contrib::load::load_request;
 use sdkman_contrib::receipt::{Receipt, write_receipt};
 use sdkman_contrib::request_path::{RequestPath, Timestamp};
@@ -10,7 +11,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use support::archives::write_zip;
-use support::fakes::{FakeArchives, FakeValidator};
+use support::fakes::{FakeArchives, FakeHops, FakeValidator};
 use support::fixtures::{GOOD_ENTRIES_1_2_0 as GOOD_ENTRIES, REGISTRATION, REGISTRATION_PATH};
 use support::repo::TempRepo;
 use tempfile::TempDir;
@@ -418,4 +419,73 @@ fn default_rows_validate_with_stable_tag() {
     assert_eq!(bodies[0].tags, Some(vec!["stable".to_owned()]));
     assert_eq!(bodies[1].version, "1.3.0");
     assert_eq!(bodies[1].tags, None);
+}
+
+const GITHUB_URL: &str = "https://github.com/jpx/jpx/releases/download/v1.2.0/jpx-1.2.0.zip";
+const CDN_URL: &str = "https://objects.githubusercontent.com/jpx-1.2.0.zip";
+
+fn zip_bytes(entries: &[(&str, u32)]) -> Vec<u8> {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("a.zip");
+    write_zip(&file, entries);
+    std::fs::read(file).unwrap()
+}
+
+fn github_release_repo() -> TempRepo {
+    let repo = repo_listing("jpx\n");
+    repo.write(RELEASE_PATH, &RELEASE.replace(ARCHIVE_URL, GITHUB_URL));
+    repo
+}
+
+fn check_over(
+    repo: &TempRepo,
+    archives: &dyn ArchiveSource,
+    validator: &FakeValidator,
+) -> sdkman_contrib::report::Report {
+    let context = CheckContext {
+        repo_root: repo.path(),
+        now: now_at("20261010T000000Z"),
+        validator,
+        archives,
+    };
+    run_check(&context, RELEASE_PATH)
+}
+
+#[test]
+fn github_release_download_passes() {
+    let repo = github_release_repo();
+    let hops = FakeHops::default()
+        .redirecting(GITHUB_URL, CDN_URL)
+        .serving(CDN_URL, &zip_bytes(&GOOD_ENTRIES));
+    let validator = FakeValidator::default();
+    let report = check_over(&repo, &hops, &validator);
+    assert!(!report.has_failures(), "{}", report.render_text());
+    assert!(
+        report
+            .render_text()
+            .starts_with("OK    jpx 1.2.0 LINUX_X64")
+    );
+    assert_eq!(hops.requested(), vec![GITHUB_URL, CDN_URL]);
+    let bodies = validator.versions();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0].url, GITHUB_URL);
+}
+
+#[test]
+fn redirected_archive_is_judged() {
+    let repo = github_release_repo();
+    let hops = FakeHops::default()
+        .redirecting(GITHUB_URL, CDN_URL)
+        .serving(
+            CDN_URL,
+            &zip_bytes(&[("jpx-1.2.0/", 0o755), ("jpx-1.2.0/README", 0o644)]),
+        );
+    let report = check_over(&repo, &hops, &FakeValidator::default());
+    assert!(report.has_failures());
+    assert!(
+        report
+            .render_text()
+            .starts_with("FAIL  jpx 1.2.0 LINUX_X64")
+    );
+    assert!(report.render_text().contains("no bin/ under jpx-1.2.0/"));
 }

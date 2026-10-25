@@ -12,7 +12,7 @@ use sdkman_contrib::request_path::RequestPath;
 use sdkman_contrib::state_api::WriteError;
 use sha2::{Digest, Sha256};
 use support::archives::tar_gz;
-use support::fakes::{FakeArchives, FakeWriter};
+use support::fakes::{FakeArchives, FakeHops, FakeWriter};
 use support::fixtures::GOOD_ENTRIES;
 use support::repo::TempRepo;
 use tempfile::TempDir;
@@ -92,6 +92,33 @@ fn replaced_archive_writes_nothing() {
         ])
     );
     assert_eq!(writer.write_attempts(), 0);
+}
+
+#[test]
+fn redirected_archive_posts_the_written_url() {
+    let dir = TempDir::new().unwrap();
+    let written = "https://github.com/jpx/jpx/releases/download/v1.0.0/jpx-1.0.0.tar.gz";
+    let target = "https://objects.githubusercontent.com/jpx-1.0.0.tar.gz";
+    let bytes = std::fs::read(tar_gz(&dir, "1.0.0.tar.gz", &GOOD_ENTRIES)).unwrap();
+    let hops = FakeHops::default()
+        .redirecting(written, target)
+        .serving(target, &bytes);
+    let writer = FakeWriter::default();
+    let declared = Archive {
+        url: written.to_owned(),
+        ..archive("1.0.0")
+    };
+    apply_request(
+        &release(vec![("1.0.0", declared)], None),
+        &writer,
+        &hops,
+        COMMIT,
+        &run(),
+    )
+    .unwrap();
+    let rows = writer.rows();
+    let row = &rows[&("1.0.0".to_owned(), "LINUX_X64".to_owned())];
+    assert_eq!(row.url, written);
 }
 
 #[test]
