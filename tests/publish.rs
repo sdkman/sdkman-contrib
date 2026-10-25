@@ -180,6 +180,24 @@ fn rows_post_without_tags() {
     assert!(state.posted().iter().all(|body| body.tags.is_none()));
 }
 
+#[test]
+fn release_platforms_name_each_suffix() {
+    let pairs: Vec<(&str, &str)> = RELEASE_PLATFORMS
+        .iter()
+        .map(|release_platform| (release_platform.platform, release_platform.suffix))
+        .collect();
+    assert_eq!(
+        pairs,
+        [
+            ("LINUX_ARM64", "linux-arm64.tar.gz"),
+            ("MAC_X64", "macos-x64.tar.gz"),
+            ("MAC_ARM64", "macos-arm64.tar.gz"),
+            ("WINDOWS_X64", "windows-x64.zip"),
+            ("LINUX_X64", "linux-x64.tar.gz"),
+        ]
+    );
+}
+
 const URL_BASE: &str = "https://github.com/sdkman/sdkman-contrib/releases/download/v1.1.0";
 
 #[test]
