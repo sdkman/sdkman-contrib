@@ -963,6 +963,7 @@ dependencies = [
  "flate2",
  "hex",
  "md-5",
+ "percent-encoding",
  "predicates",
  "serde",
  "serde_json",
