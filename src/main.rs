@@ -10,6 +10,7 @@ use sdkman_contrib::check::{CheckContext, check_request};
 use sdkman_contrib::check_digests::CheckDigests;
 use sdkman_contrib::fetch::HttpArchiveSource;
 use sdkman_contrib::git::Git;
+use sdkman_contrib::github::GitHubDigests;
 use sdkman_contrib::report::{Report, ReportLine, Status};
 use sdkman_contrib::request_path::Kind;
 use sdkman_contrib::skeleton::{
@@ -210,7 +211,12 @@ fn apply(args: ApplyArgs) -> ExitCode {
     }
 
     let archives = HttpArchiveSource::new();
-    match apply_queue(&repo_root, &state, &archives, &git, &run) {
+    let digests = GitHubDigests::new(
+        &env::var("GITHUB_API_URL").unwrap_or_default(),
+        &env::var("GITHUB_REPOSITORY").unwrap_or_default(),
+        &env::var("GITHUB_TOKEN").unwrap_or_default(),
+    );
+    match apply_queue(&repo_root, &state, &archives, &digests, &git, &run) {
         Ok(applied) => {
             for path in applied {
                 println!("applied {path}");
