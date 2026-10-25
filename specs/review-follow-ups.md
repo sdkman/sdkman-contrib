@@ -15,18 +15,29 @@ wins.
 
 ## Behaviour
 
-**A contributor can install `contrib` without building it.** The README tells a new
-contributor how to get a working `contrib` on their machine, step by step, for every platform
-SDKMAN supports for contributors: Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows
-x64. They need no Rust toolchain, no clone of the repo and no prior knowledge of GitHub
-releases. Installing is the recommended path, because it gives the contributor `contrib new`
-and `contrib check` before they push. A hand-written file stays valid, but the README no
-longer presents installing as optional extra.
+**`contrib` is a SDKMAN candidate.** A contributor installs it with `sdk install contrib` and
+keeps it current with `sdk upgrade contrib`, on Linux x64, Linux ARM64, macOS x64, macOS ARM64
+and Windows x64. Every contributor is a SDKMAN user, so the tool reaches them through the
+channel they already have, and an upgrade brings them the check's latest rules. They need no
+Rust toolchain, no clone of the repo and no prior knowledge of GitHub releases.
+
+**Every release of `contrib` reaches SDKMAN on its own.** Tagging a release publishes it as a
+new `contrib` version in State, for every platform above, and makes it the default. It is
+published as a vendor publishes its own candidate, through State's vendor role, never through
+a `contrib` request. So `contrib` is never listed in `contrib-candidates.txt`, and a broken
+`contrib` can never block its own fix. Each published archive is well formed by SDKMAN's own
+rules: one `contrib-<version>` base directory holding `bin/contrib`.
+
+**The README tells a contributor how to install it.** Installing through SDKMAN is the
+recommended path, because it gives the contributor `contrib new` and `contrib check` before
+they push. The README also names the GitHub release binaries as a fallback for anyone who
+cannot use SDKMAN. A hand-written file stays valid, but the README no longer presents
+installing as an optional extra.
 
 **A published release exists before the process is announced.** At least one tagged release
-carries a binary for each platform above, and the install steps in the README work against it
-as written. Contributors can reach the releases and the README without being members of the
-`sdkman` organisation.
+is installable with `sdk install contrib` on each platform above, and carries a binary for
+each on GitHub too. Contributors can reach the releases and the README without being members
+of the `sdkman` organisation.
 
 **Archive URLs that redirect are accepted.** A URL that answers a redirect, as every GitHub
 release download does, passes the URL rule when the redirect leads to the archive. Every hop
@@ -56,29 +67,27 @@ placeholder that has to be filled in elsewhere.
 
 ## Business Rules
 
-1. **Install steps cover every contributor platform.** Linux x64, Linux ARM64, macOS x64,
-   macOS ARM64 and Windows x64 each have install steps in the README, and each has a binary in
-   every release. A platform without a binary is not listed as supported.
+1. **Every contributor platform is covered.** Linux x64, Linux ARM64, macOS x64, macOS ARM64
+   and Windows x64 each get a `contrib` version in State and a binary on GitHub with every
+   release. A platform without one is not listed as supported.
 2. **Install steps are verifiable.** The README shows how to confirm the install worked, for
    example by running `contrib` and seeing its version.
-3. **Redirect chains stay on `https`.** A chain with any non-`https` hop fails the URL rule.
+3. **`contrib` publishes itself as a vendor.** Its releases reach State through the vendor
+   role, and `contrib` is never listed in `contrib-candidates.txt`.
+4. **A release reaches SDKMAN only when it is complete.** A release that cannot publish every
+   platform shows as a failed release, and the previous default stays the default.
+5. **Redirect chains stay on `https`.** A chain with any non-`https` hop fails the URL rule.
    A chain that never ends in a `200` fails it too, as does one longer than a sane bound.
-4. **The final file is what the archive rules judge.** The `.zip` or `.tar.gz` rule, the
+6. **The final file is what the archive rules judge.** The `.zip` or `.tar.gz` rule, the
    archive format, the base directory and `bin/` rules all apply to the archive at the end of
    the chain.
-5. **State receives the URL as written.** A redirect is never resolved into the row.
-6. **The check runs trusted code.** No file added or changed by a PR is executed, built or
+7. **State receives the URL as written.** A redirect is never resolved into the row.
+8. **The check runs trusted code.** No file added or changed by a PR is executed, built or
    loaded while checking that PR's request.
-7. **A changed archive blocks its request.** A mismatch between the archive seen at check
+9. **A changed archive blocks its request.** A mismatch between the archive seen at check
    time and at apply time fails the apply for that request before anything for it is written.
-8. **An unreachable default only warns.** It never fails the check, because State, not this
+10. **An unreachable default only warns.** It never fails the check, because State, not this
    repo, owns the default cascade.
-
-## Open Questions
-
-- Should `contrib` also be installable through SDKMAN itself (`sdk install contrib`)? It
-  would be the most natural channel for this audience, but it makes the tool a SDKMAN
-  candidate with its own release path.
 
 ## Out of Scope
 
@@ -89,9 +98,13 @@ placeholder that has to be filled in elsewhere.
 
 ## Acceptance Criteria
 
-- [ ] The README has install steps for Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64 that need no Rust toolchain or clone, and a way to confirm the install worked
-- [ ] The README presents installing `contrib` as the recommended path for contributors
-- [ ] A published release carries a working binary for each of those five platforms, and the README's steps work against it as written
+- [ ] `sdk install contrib` installs a working `contrib` on Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64, and `sdk upgrade contrib` moves to a newer release
+- [ ] Tagging a release publishes it to State through the vendor role as the new default `contrib` version for all five platforms, with no manual step
+- [ ] Every published `contrib` archive passes SDKMAN's well-formed archive rules
+- [ ] `contrib` is not listed in `contrib-candidates.txt`
+- [ ] A release that fails to publish any platform leaves the previous default in place and shows as failed
+- [ ] Each release also carries a working binary per platform on GitHub
+- [ ] The README presents `sdk install contrib` as the recommended install path, names the GitHub binaries as the fallback, and shows how to confirm the install worked
 - [ ] The README and the releases can be read by someone outside the `sdkman` organisation
 - [ ] A request whose archive URL is a GitHub release download passes the URL rule, and the archive rules judge the downloaded file
 - [ ] A redirect chain with a non-`https` hop, no final `200`, or no end fails the check
