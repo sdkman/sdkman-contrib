@@ -252,14 +252,18 @@ impl HttpState {
             }
         }
         .map_err(|e| format!("{url} could not be reached: {e}"))?;
-        let status = response.status().as_u16();
-        let text = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| format!("{url} answer could not be read: {e}"))?;
-        let body = serde_json::from_str(&text).unwrap_or(Value::Null);
-        Ok(Answer { status, body })
+        answer_of(&url, &mut response)
     }
+}
+
+fn answer_of(url: &str, response: &mut ureq::http::Response<ureq::Body>) -> Result<Answer, String> {
+    let status = response.status().as_u16();
+    let text = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("{url} answer could not be read: {e}"))?;
+    let body = serde_json::from_str(&text).unwrap_or(Value::Null);
+    Ok(Answer { status, body })
 }
 
 static CACHE_BUSTERS: AtomicU64 = AtomicU64::new(0);
@@ -289,13 +293,7 @@ impl HttpState {
             .get(&url)
             .call()
             .map_err(|e| WriteError::Transport(format!("{url} could not be reached: {e}")))?;
-        let status = response.status().as_u16();
-        let text = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| WriteError::Transport(format!("{url} answer could not be read: {e}")))?;
-        let body = serde_json::from_str(&text).unwrap_or(Value::Null);
-        Ok(Answer { status, body })
+        answer_of(&url, &mut response).map_err(WriteError::Transport)
     }
 }
 
