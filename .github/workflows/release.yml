@@ -44,19 +44,23 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           TARGET: ${{ matrix.target }}
-        run: tar -czf "contrib-$TAG-$TARGET.tar.gz" -C "target/$TARGET/release" contrib
+        run: |
+          mkdir dist
+          tar -czf "dist/contrib-$TAG-$TARGET.tar.gz" -C "target/$TARGET/release" contrib
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
           TARGET: ${{ matrix.target }}
-        run: 7z a "contrib-$TAG-$TARGET.zip" "./target/$TARGET/release/contrib.exe"
+        run: |
+          mkdir dist
+          7z a "dist/contrib-$TAG-$TARGET.zip" "./target/$TARGET/release/contrib.exe"
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: contrib-${{ matrix.target }}
-          path: contrib-*
+          path: dist/contrib-*
 
   publish:
     needs: build
