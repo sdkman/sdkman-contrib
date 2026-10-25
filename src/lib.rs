@@ -3,6 +3,7 @@ pub mod digest;
 pub mod fetch;
 pub mod listing;
 pub mod receipt;
+pub mod report;
 pub mod request;
 pub mod request_path;
 pub mod state_api;
