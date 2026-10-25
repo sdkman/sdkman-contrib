@@ -66,6 +66,7 @@ jobs:
             pr-number
             head-sha
           if-no-files-found: ignore
+          overwrite: true
       - name: Upload digests
         if: steps.check.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -74,6 +75,7 @@ jobs:
           path: digests.json
           retention-days: 90
           if-no-files-found: error
+          overwrite: true
       - name: Post request check status
         if: always()
         env:
