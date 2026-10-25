@@ -11,6 +11,7 @@ use crate::state_body::VersionBody;
 pub struct ReleasePlatform {
     pub platform: &'static str,
     pub suffix: &'static str,
+    pub format: ArchiveFormat,
 }
 
 /// `LINUX_X64` comes last: State moves the default with its `stable` tag.
@@ -18,22 +19,27 @@ pub const RELEASE_PLATFORMS: [ReleasePlatform; 5] = [
     ReleasePlatform {
         platform: "LINUX_ARM64",
         suffix: "linux-arm64.tar.gz",
+        format: ArchiveFormat::TarGz,
     },
     ReleasePlatform {
         platform: "MAC_X64",
         suffix: "macos-x64.tar.gz",
+        format: ArchiveFormat::TarGz,
     },
     ReleasePlatform {
         platform: "MAC_ARM64",
         suffix: "macos-arm64.tar.gz",
+        format: ArchiveFormat::TarGz,
     },
     ReleasePlatform {
         platform: "WINDOWS_X64",
         suffix: "windows-x64.zip",
+        format: ArchiveFormat::Zip,
     },
     ReleasePlatform {
         platform: "LINUX_X64",
         suffix: "linux-x64.tar.gz",
+        format: ArchiveFormat::TarGz,
     },
 ];
 
@@ -85,15 +91,10 @@ fn release_body(
     release_platform: &ReleasePlatform,
 ) -> Result<VersionBody, Vec<String>> {
     let path = dir.join(file_name);
-    let format = if file_name.ends_with(".zip") {
-        ArchiveFormat::Zip
-    } else {
-        ArchiveFormat::TarGz
-    };
     let sha256 = sha256_of(&path).map_err(|error| vec![format!("cannot read: {error}")])?;
     let verdict = inspect_archive(
         &path,
-        format,
+        release_platform.format,
         RELEASE_CANDIDATE,
         version,
         release_platform.platform,
