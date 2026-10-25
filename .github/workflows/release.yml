@@ -114,8 +114,9 @@ jobs:
           name: contrib-${{ matrix.platform }}
           path: dist/contrib-*
 
-  publish:
-    needs: build
+  github-release:
+    name: Create GitHub release
+    needs: [verify, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -129,5 +130,42 @@ jobs:
           merge-multiple: true
       - name: Create release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes packages/*
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists"
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes packages/*
+          fi
+
+  publish-state:
+    name: Publish to State
+    needs: [verify, github-release]
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - name: Download release packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir packages
+      - name: Extract the Linux x64 binary
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          tar -xzf "packages/contrib-$VERSION-linux-x64.tar.gz"
+          reported=$("contrib-$VERSION/bin/contrib" --version)
+          if [ "$reported" != "contrib $VERSION" ]; then
+            echo "binary reports '$reported', expected 'contrib $VERSION'" >&2
+            exit 1
+          fi
+      - name: Publish to State
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          VENDOR_EMAIL: ${{ secrets.VENDOR_EMAIL }}
+          VENDOR_PASSWORD: ${{ secrets.VENDOR_PASSWORD }}
+          CONTRIB_STATE_URL: ${{ vars.CONTRIB_STATE_URL }}
+        run: |
+          "contrib-$VERSION/bin/contrib" publish \
+            --url-base "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
+            packages
