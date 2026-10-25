@@ -9,6 +9,7 @@ pub mod receipt;
 pub mod report;
 pub mod request;
 pub mod request_path;
+pub mod skeleton;
 pub mod state_api;
 pub mod state_body;
 pub mod verify;

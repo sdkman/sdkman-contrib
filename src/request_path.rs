@@ -72,6 +72,10 @@ impl Timestamp {
             })
     }
 
+    pub fn from_utc(at: DateTime<Utc>) -> Self {
+        Self(at.naive_utc().with_nanosecond(0).expect("zero nanoseconds"))
+    }
+
     pub fn at(self) -> NaiveDateTime {
         self.0
     }
