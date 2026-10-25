@@ -1,9 +1,11 @@
-use std::cell::Cell;
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError};
+use sdkman_contrib::state_api::{Answer, StateValidator};
+use sdkman_contrib::state_body::{CandidateBody, VersionBody};
 
 /// Answers a URL with the bytes of a local file, and `404` for any URL it was not given.
 #[derive(Default)]
@@ -29,5 +31,56 @@ impl ArchiveSource for FakeArchives {
         let path = self.files.get(url).ok_or(FetchError::Status(404))?;
         let file = File::open(path).map_err(|error| FetchError::Transport(error.to_string()))?;
         Download::from_reader(file).map_err(|error| FetchError::Transport(error.to_string()))
+    }
+}
+
+/// Records every body it is asked to validate. Answers its scripted results in order, and `204` once the script runs dry.
+#[derive(Default)]
+pub struct FakeValidator {
+    script: RefCell<VecDeque<Result<Answer, String>>>,
+    versions: RefCell<Vec<VersionBody>>,
+    candidates: RefCell<Vec<CandidateBody>>,
+}
+
+impl FakeValidator {
+    pub fn answering(statuses: &[u16]) -> Self {
+        statuses.iter().fold(Self::default(), |fake, status| {
+            fake.then(Ok(Answer {
+                status: *status,
+                body: serde_json::Value::Null,
+            }))
+        })
+    }
+
+    pub fn then(self, result: Result<Answer, String>) -> Self {
+        self.script.borrow_mut().push_back(result);
+        self
+    }
+
+    pub fn versions(&self) -> Vec<VersionBody> {
+        self.versions.borrow().clone()
+    }
+
+    pub fn candidates(&self) -> Vec<CandidateBody> {
+        self.candidates.borrow().clone()
+    }
+
+    fn next(&self) -> Result<Answer, String> {
+        self.script.borrow_mut().pop_front().unwrap_or(Ok(Answer {
+            status: 204,
+            body: serde_json::Value::Null,
+        }))
+    }
+}
+
+impl StateValidator for FakeValidator {
+    fn validate_version(&self, body: &VersionBody) -> Result<Answer, String> {
+        self.versions.borrow_mut().push(body.clone());
+        self.next()
+    }
+
+    fn validate_candidate(&self, body: &CandidateBody) -> Result<Answer, String> {
+        self.candidates.borrow_mut().push(body.clone());
+        self.next()
     }
 }

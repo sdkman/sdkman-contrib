@@ -1,11 +1,16 @@
 mod support;
 
 use chrono::{DateTime, Utc};
-use sdkman_contrib::check::admit_timestamp;
+use sdkman_contrib::check::{CheckContext, admit_timestamp, run_check};
 use sdkman_contrib::load::load_request;
 use sdkman_contrib::receipt::{Receipt, write_receipt};
 use sdkman_contrib::request_path::{RequestPath, Timestamp};
+use sdkman_contrib::state_api::Answer;
+use serde_json::json;
+use support::archives::write_zip;
+use support::fakes::{FakeArchives, FakeValidator};
 use support::repo::TempRepo;
+use tempfile::TempDir;
 
 const REGISTRATION_PATH: &str = "requests/jpx/20261008T120000Z-register-jpx.yaml";
 const RELEASE_PATH: &str = "requests/jpx/20261008T130000Z-release-jpx-1.2.0.yaml";
@@ -150,4 +155,252 @@ fn request_after_latest_receipt_is_admitted() {
     write_receipt(repo.path(), &earlier, &receipt()).unwrap();
     let path = RequestPath::parse(REGISTRATION_PATH).unwrap();
     assert!(admit_timestamp(repo.path(), &path, now_at("20261010T000000Z")).is_ok());
+}
+
+const ARCHIVE_URL: &str = "https://downloads.jpx.dev/jpx-1.2.0.zip";
+const OTHER_URL: &str = "https://downloads.jpx.dev/jpx-1.3.0.zip";
+const GOOD_ENTRIES: [(&str, u32); 3] = [
+    ("jpx-1.2.0/", 0o755),
+    ("jpx-1.2.0/bin/", 0o755),
+    ("jpx-1.2.0/bin/jpx", 0o755),
+];
+
+fn refusal(message: &str) -> Result<Answer, String> {
+    Ok(Answer {
+        status: 400,
+        body: json!({ "error": "validation", "failures": [{ "field": "candidate", "message": message }] }),
+    })
+}
+
+struct Fixture {
+    repo: TempRepo,
+    archives: FakeArchives,
+    dir: TempDir,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        Self {
+            repo: repo_listing("jpx\n"),
+            archives: FakeArchives::default(),
+            dir: TempDir::new().unwrap(),
+        }
+    }
+
+    fn serving(mut self, url: &str, name: &str, entries: &[(&str, u32)]) -> Self {
+        let file = self.dir.path().join(name);
+        write_zip(&file, entries);
+        self.archives = self.archives.serving(url, &file);
+        self
+    }
+
+    fn check(&self, validator: &FakeValidator, path: &str) -> sdkman_contrib::report::Report {
+        let context = CheckContext {
+            repo_root: self.repo.path(),
+            now: now_at("20261010T000000Z"),
+            validator,
+            archives: &self.archives,
+        };
+        run_check(&context, path)
+    }
+}
+
+fn good_release() -> Fixture {
+    let fixture = Fixture::new().serving(ARCHIVE_URL, "a.zip", &GOOD_ENTRIES);
+    fixture.repo.write(RELEASE_PATH, RELEASE);
+    fixture
+}
+
+#[test]
+fn registration_posts_its_candidate_body() {
+    let fixture = Fixture::new();
+    fixture.repo.write(REGISTRATION_PATH, REGISTRATION);
+    let validator = FakeValidator::default();
+    let report = fixture.check(&validator, REGISTRATION_PATH);
+    assert!(!report.has_failures());
+    assert_eq!(report.render_text(), "OK    jpx registration\n");
+    let bodies = validator.candidates();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0].candidate, "jpx");
+    assert_eq!(bodies[0].website_url, "https://jpx.dev/");
+}
+
+#[test]
+fn refused_registration_fails_with_state_message() {
+    let fixture = Fixture::new();
+    fixture.repo.write(REGISTRATION_PATH, REGISTRATION);
+    let validator = FakeValidator::default().then(refusal("name is blank"));
+    let report = fixture.check(&validator, REGISTRATION_PATH);
+    assert!(report.has_failures());
+    assert_eq!(
+        report.render_text(),
+        "FAIL  jpx registration  candidate: name is blank\n"
+    );
+}
+
+#[test]
+fn unregistered_candidate_fails_each_row() {
+    let fixture = good_release();
+    let validator = FakeValidator::default().then(refusal("jpx is not registered"));
+    let report = fixture.check(&validator, RELEASE_PATH);
+    assert!(report.has_failures());
+    assert!(
+        report
+            .render_text()
+            .contains("candidate: jpx is not registered")
+    );
+}
+
+#[test]
+fn passing_release_is_ok_and_posts_the_computed_sha256() {
+    let fixture = good_release();
+    let validator = FakeValidator::default();
+    let report = fixture.check(&validator, RELEASE_PATH);
+    assert!(!report.has_failures());
+    assert!(
+        report
+            .render_text()
+            .starts_with("OK    jpx 1.2.0 LINUX_X64")
+    );
+    let bodies = validator.versions();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0].sha256sum.len(), 64);
+    assert!(report.render_text().contains(&bodies[0].sha256sum));
+}
+
+#[test]
+fn missing_bin_fails_the_row() {
+    let fixture = Fixture::new().serving(
+        ARCHIVE_URL,
+        "a.zip",
+        &[("jpx-1.2.0/", 0o755), ("jpx-1.2.0/README", 0o644)],
+    );
+    fixture.repo.write(RELEASE_PATH, RELEASE);
+    let report = fixture.check(&FakeValidator::default(), RELEASE_PATH);
+    assert!(report.has_failures());
+    assert!(
+        report
+            .render_text()
+            .starts_with("FAIL  jpx 1.2.0 LINUX_X64")
+    );
+    assert!(report.render_text().contains("no bin/ under jpx-1.2.0/"));
+}
+
+#[test]
+fn each_checksum_mismatch_fails_the_row() {
+    for algorithm in ["md5", "sha256", "sha512"] {
+        let fixture = good_release();
+        let declared = format!(
+            "      LINUX_X64:\n        url: {ARCHIVE_URL}\n        {algorithm}: {}\n",
+            "0".repeat(8)
+        );
+        let release = RELEASE.replace(&format!("      LINUX_X64: {ARCHIVE_URL}\n"), &declared);
+        fixture.repo.write(RELEASE_PATH, &release);
+        let report = fixture.check(&FakeValidator::default(), RELEASE_PATH);
+        assert!(report.has_failures(), "{algorithm}");
+        assert!(
+            report
+                .render_text()
+                .contains(&format!("declared {algorithm} does not match the download")),
+            "{algorithm}"
+        );
+        assert!(
+            report
+                .render_text()
+                .contains(&format!("{algorithm} declared, not matched")),
+            "{algorithm}"
+        );
+    }
+}
+
+#[test]
+fn undownloadable_archive_fails_without_a_state_call() {
+    let fixture = Fixture::new();
+    fixture.repo.write(RELEASE_PATH, RELEASE);
+    let validator = FakeValidator::default();
+    let report = fixture.check(&validator, RELEASE_PATH);
+    assert!(report.has_failures());
+    assert!(validator.versions().is_empty());
+    assert!(report.render_text().contains("answered 404"));
+}
+
+#[test]
+fn transport_error_is_one_state_failure() {
+    let fixture = good_release();
+    let validator = FakeValidator::default().then(Err("connection refused".to_owned()));
+    let report = fixture.check(&validator, RELEASE_PATH);
+    assert!(report.has_failures());
+    assert!(
+        report
+            .render_text()
+            .contains("State could not be reached: connection refused")
+    );
+}
+
+#[test]
+fn non_204_answer_without_messages_names_its_status() {
+    let fixture = good_release();
+    let validator = FakeValidator::answering(&[404]);
+    let report = fixture.check(&validator, RELEASE_PATH);
+    assert!(report.render_text().contains("State answered 404"));
+}
+
+#[test]
+fn load_failure_is_one_fail_line_and_stops() {
+    let fixture = Fixture::new();
+    fixture.repo.write(REGISTRATION_PATH, REGISTRATION);
+    let validator = FakeValidator::default();
+    let report = fixture.check(&validator, "requests/jpx/jpx.yaml");
+    assert_eq!(report.render_text().lines().count(), 1);
+    assert!(
+        report
+            .render_text()
+            .starts_with("FAIL  requests/jpx/jpx.yaml")
+    );
+    assert!(validator.candidates().is_empty());
+}
+
+#[test]
+fn backdated_request_fails_the_check_without_a_state_call() {
+    let fixture = Fixture::new();
+    fixture.repo.write(REGISTRATION_PATH, REGISTRATION);
+    let later = RequestPath::parse("requests/jpx/20261009T140000Z-release-later.yaml").unwrap();
+    write_receipt(fixture.repo.path(), &later, &receipt()).unwrap();
+    let validator = FakeValidator::default();
+    let report = fixture.check(&validator, REGISTRATION_PATH);
+    assert!(report.has_failures());
+    assert!(
+        report
+            .render_text()
+            .contains("earlier than the latest applied request")
+    );
+    assert!(validator.candidates().is_empty());
+}
+
+#[test]
+fn default_rows_validate_with_stable_tag() {
+    let fixture = Fixture::new()
+        .serving(ARCHIVE_URL, "a.zip", &GOOD_ENTRIES)
+        .serving(
+            OTHER_URL,
+            "b.zip",
+            &[
+                ("jpx-1.3.0/", 0o755),
+                ("jpx-1.3.0/bin/", 0o755),
+                ("jpx-1.3.0/bin/jpx", 0o755),
+            ],
+        );
+    let release = format!(
+        "candidate: jpx\ndefault: 1.2.0\nversions:\n  - version: 1.2.0\n    platforms:\n      LINUX_X64: {ARCHIVE_URL}\n  - version: 1.3.0\n    platforms:\n      LINUX_X64: {OTHER_URL}\n"
+    );
+    fixture.repo.write(RELEASE_PATH, &release);
+    let validator = FakeValidator::default();
+    let report = fixture.check(&validator, RELEASE_PATH);
+    assert!(!report.has_failures());
+    let bodies = validator.versions();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0].version, "1.2.0");
+    assert_eq!(bodies[0].tags, Some(vec!["stable".to_owned()]));
+    assert_eq!(bodies[1].version, "1.3.0");
+    assert_eq!(bodies[1].tags, None);
 }
