@@ -14,7 +14,10 @@ fn contrib(repo: &TempRepo, state: &FakeState) -> Command {
     let mut command = contrib_command(repo, state);
     command
         .env("COMMUNITY_EMAIL", "bot@example.com")
-        .env("COMMUNITY_PASSWORD", "secret");
+        .env("COMMUNITY_PASSWORD", "secret")
+        .env("GITHUB_REPOSITORY", "sdkman/sdkman-contrib")
+        .env("GITHUB_TOKEN", "gh-token")
+        .env("GITHUB_API_URL", "http://127.0.0.1:1");
     command
 }
 
@@ -63,6 +66,22 @@ fn apply_needs_credentials() {
         .code(2)
         .stderr(predicate::str::contains(
             "missing COMMUNITY_EMAIL or COMMUNITY_PASSWORD",
+        ));
+    assert!(state.requests().is_empty());
+}
+
+#[test]
+fn apply_needs_github_variables() {
+    let repo = repo_with_pending_registration();
+    let state = FakeState::answering(&[]);
+    contrib(&repo, &state)
+        .env("GITHUB_REPOSITORY", "")
+        .env("GITHUB_TOKEN", "")
+        .arg("apply")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "missing GITHUB_REPOSITORY or GITHUB_TOKEN",
         ));
     assert!(state.requests().is_empty());
 }
