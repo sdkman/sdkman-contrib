@@ -290,6 +290,17 @@ fn run_info_reads_the_github_run_url() {
 }
 
 #[test]
+fn run_info_with_a_missing_github_var_is_local() {
+    let now = Utc.with_ymd_and_hms(2026, 10, 14, 9, 40, 57).unwrap();
+    let vars = BTreeMap::from([
+        ("GITHUB_SERVER_URL", "https://github.com"),
+        ("GITHUB_REPOSITORY", "sdkman/sdkman-contrib"),
+    ]);
+    let info = RunInfo::from_vars(now, |name| vars.get(name).map(|value| (*value).to_owned()));
+    assert_eq!(info.run_url, "local");
+}
+
+#[test]
 fn run_info_without_github_vars_is_local() {
     assert_eq!(run().run_url, "local");
 }

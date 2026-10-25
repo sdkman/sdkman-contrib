@@ -2,6 +2,7 @@ mod support;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use sdkman_contrib::request_path::RequestPath;
 use support::cli::contrib_command;
 use support::fake_state::FakeState;
 use support::fixtures::{REGISTRATION, REGISTRATION_PATH};
@@ -104,6 +105,11 @@ fn void_records_a_receipt_and_writes_nothing_to_state() {
         repo.remote_log()
             .contains(&format!("chore(apply): void {REGISTRATION_PATH}"))
     );
+    let receipt_path = RequestPath::parse(REGISTRATION_PATH)
+        .unwrap()
+        .receipt_path();
+    let receipt = std::fs::read_to_string(repo.path().join(receipt_path)).unwrap();
+    assert!(receipt.contains("voided: mistake"), "{receipt}");
 }
 
 #[test]

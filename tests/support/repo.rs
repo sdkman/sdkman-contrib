@@ -77,7 +77,7 @@ impl TempRepo {
         self.git(&["rev-parse", "HEAD"]).trim().to_owned()
     }
 
-    fn git(&self, args: &[&str]) -> String {
+    pub fn git(&self, args: &[&str]) -> String {
         run_git(self.dir.path(), args)
     }
 }

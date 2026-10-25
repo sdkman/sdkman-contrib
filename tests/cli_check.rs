@@ -118,3 +118,40 @@ fn report_file_holds_the_markdown() {
     let report = std::fs::read_to_string(repo.path().join("report.md")).unwrap();
     assert!(report.starts_with("## contrib check: PASS\n"));
 }
+
+#[test]
+fn report_file_is_written_on_fail() {
+    let repo = repo_with_registration();
+    let state = FakeState::answering(&[]);
+    contrib(&repo, &state)
+        .args(["check", "requests/jpx/jpx.yaml", "--report", "report.md"])
+        .assert()
+        .code(1);
+    let report = std::fs::read_to_string(repo.path().join("report.md")).unwrap();
+    assert!(report.starts_with("## contrib check: FAIL\n"), "{report}");
+}
+
+#[test]
+fn unwritable_report_path_exits_1() {
+    let repo = repo_with_registration();
+    let state = FakeState::answering(&[(204, "")]);
+    contrib(&repo, &state)
+        .args(["check", REGISTRATION_PATH, "--report", "missing/report.md"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("cannot write"));
+}
+
+#[test]
+fn base_accepts_the_matching_file() {
+    let repo = TempRepo::new();
+    repo.write("contrib-candidates.txt", "jpx\n");
+    let base = repo.commit_all("base");
+    repo.write(REGISTRATION_PATH, REGISTRATION);
+    repo.commit_all("add request");
+    let state = FakeState::answering(&[(204, "")]);
+    contrib(&repo, &state)
+        .args(["check", REGISTRATION_PATH, "--base", &base])
+        .assert()
+        .success();
+}

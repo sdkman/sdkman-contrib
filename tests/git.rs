@@ -19,6 +19,25 @@ fn added_in_names_the_adding_commit() {
 }
 
 #[test]
+fn added_in_names_the_merge_commit() {
+    let repo = TempRepo::new();
+    repo.write("README.md", "hello\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.write("requests/jpx/a.yaml", "a\n");
+    repo.commit_all("add request");
+    repo.git(&["checkout", "main"]);
+    repo.git(&["merge", "--no-ff", "feature", "-m", "merge feature"]);
+    let merge = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+
+    let commit = Git::new(repo.path())
+        .added_in("requests/jpx/a.yaml")
+        .expect("added in");
+
+    assert!(merge.starts_with(&commit), "{commit} is not {merge}");
+}
+
+#[test]
 fn added_in_fails_for_an_unknown_path() {
     let repo = TempRepo::new();
     repo.write("other.txt", "x\n");
