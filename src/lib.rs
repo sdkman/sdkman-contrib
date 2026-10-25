@@ -5,6 +5,7 @@ pub mod check;
 pub mod digest;
 pub mod fetch;
 pub mod git;
+pub mod http;
 pub mod listing;
 pub mod load;
 pub mod receipt;

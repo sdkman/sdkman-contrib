@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::http::agent_config;
 use crate::state_body::{CandidateBody, VersionBody};
 
 pub const DEFAULT_STATE_URL: &str = "https://state.sdkman.io";
@@ -97,11 +98,8 @@ pub struct HttpState {
 
 impl HttpState {
     pub fn new(base_url: &str) -> Self {
-        let agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_connect(Some(Duration::from_secs(30)))
+        let agent = agent_config()
             .timeout_global(Some(Duration::from_secs(60)))
-            .user_agent(concat!("sdkman-contrib/", env!("CARGO_PKG_VERSION")))
             .build()
             .into();
         Self {
