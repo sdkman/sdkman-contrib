@@ -1,0 +1,10 @@
+applied_at: 2026-10-28T15:39:46Z
+commit: 365c499
+run: https://github.com/sdkman/sdkman-contrib/actions/runs/40718063198
+rows:
+- version: 11.0.27
+  platform: UNIVERSAL
+  sha256: b958a9144c7686421ffda9b1de8aaf0a883cd3c72d543195a8ff92e46e9e9171
+  sha512: 0410cf4e15f525b5dc1330e2dbc8a14f4f2a447251d4bee17ae8baa135d5e01ed0b152e79c0e9ea534a14321c3883b9634d35a78a472c024394ca6aeb704ebff
+tag:
+  stable: 11.0.27
