@@ -4,7 +4,7 @@ use std::fs;
 
 use sdkman_contrib::publish::{PublishError, RELEASE_PLATFORMS, publish_release, release_bodies};
 use sdkman_contrib::state_body::VersionBody;
-use support::archives::{sha256_of, write_release, write_release_archive};
+use support::archives::{sha256_of, write_release, write_release_archive, write_tar_gz};
 use support::fakes::FakeVendorState;
 use tempfile::TempDir;
 
@@ -252,5 +252,26 @@ fn wrong_base_directory_fails() {
     assert!(
         error.failures[1].starts_with("contrib-1.1.0-linux-x64.tar.gz: base directory is"),
         "{error}"
+    );
+}
+
+#[test]
+fn binary_without_execute_bit_fails() {
+    let dir = TempDir::new().unwrap();
+    write_release(dir.path(), VERSION, "contrib-1.1.0");
+    write_tar_gz(
+        &dir.path().join("contrib-1.1.0-linux-x64.tar.gz"),
+        &[
+            ("contrib-1.1.0/", 0o755),
+            ("contrib-1.1.0/bin/", 0o755),
+            ("contrib-1.1.0/bin/contrib", 0o644),
+        ],
+    );
+
+    let error = release_bodies(dir.path(), VERSION, URL_BASE).unwrap_err();
+
+    assert_eq!(
+        error.failures,
+        vec!["contrib-1.1.0-linux-x64.tar.gz: no executable file in contrib-1.1.0/bin/"]
     );
 }
