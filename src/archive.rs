@@ -143,7 +143,7 @@ pub fn check_layout(
         })
     {
         verdict
-            .failures
+            .warnings
             .push(format!("no executable file in {base}/bin/"));
     }
     let conventional = format!("{candidate}-{version}");

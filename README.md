@@ -177,12 +177,11 @@ The check downloads every archive. Each one must be well formed. A hard rule fai
 |---|---|
 | The URL does not use `https`. | The base directory is not `<candidate>-<version>`. |
 | The URL does not name a file ending in `.zip` or `.tar.gz`. | The file name is not `<candidate>-<version>` or `<candidate>-<version>-...`. |
-| The URL does not end in a `200` after at most 5 redirects, each of them over `https`. | |
+| The URL does not end in a `200` after at most 5 redirects, each of them over `https`. | `bin/` holds no executable file (any platform except `WINDOWS_X64`). |
 | The URL path contains `/releases/latest/`. | |
 | The file is not a zip or a tar.gz. | |
 | The archive does not hold exactly one base directory. | |
 | There is no `bin/` directly under the base directory. | |
-| `bin/` holds no executable file (any platform except `WINDOWS_X64`). | |
 
 So a URL such as `https://downloads.jpx.dev/1.2.0/jpx-1.2.0-linux-x64.zip` is fine. A GitHub release download passes too, since the check follows its `https` redirects to the archive. State receives the URL as you wrote it, not the redirect target. Name a fixed release, never `/releases/latest/`.
 

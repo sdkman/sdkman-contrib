@@ -194,14 +194,16 @@ fn fails_when_bin_is_a_file() {
 }
 
 #[test]
-fn fails_without_executable_in_bin() {
+fn warns_without_executable_in_bin() {
     let entries = vec![
         entry(&["jpx-1.2.0", "bin", "jpx"], false, false),
         entry(&["jpx-1.2.0", "bin", "sub", "tool"], false, true),
         entry(&["jpx-1.2.0", "lib", "tool"], false, true),
     ];
+    let verdict = layout(&entries, "LINUX_X64");
+    assert!(verdict.failures.is_empty(), "{verdict:?}");
     assert_eq!(
-        layout(&entries, "LINUX_X64").failures,
+        verdict.warnings,
         vec!["no executable file in jpx-1.2.0/bin/"]
     );
 }
