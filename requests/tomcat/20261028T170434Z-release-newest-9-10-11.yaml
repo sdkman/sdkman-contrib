@@ -1,0 +1,72 @@
+candidate: tomcat
+versions:
+  - version: 9.0.119
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.119/bin/apache-tomcat-9.0.119.zip
+        sha512: 94b3fe4ec708f72dce3af30b7a1bebc828d7bfdd3f1cb1b0fc2a5ea968d6ba95ff7b77600b9de6bc3d68827fcfda1f6f53d09f3abeb95e4a0ef3a56b1c41cb80
+  - version: 9.0.120
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.120/bin/apache-tomcat-9.0.120.zip
+        sha512: fca7cfbe8255b61fac0e474a9a7ac6fbaf2792c72061fda2666b26eb5ba60718adc4fc0cbd013f14a41f101bcd7f5b70b2d3eedc37554ff0db4bdb6e2e2898f6
+  - version: 9.0.121
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.121/bin/apache-tomcat-9.0.121.zip
+        sha512: eb5a7b77a44983d1da95080761937eb07c18930dd83e5c3115b4b62c03271a083c3d386c8736633890efdb2dc74bf68e89c8da262ef5e6d0b85126b3be033e8c
+  - version: 9.0.122
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.122/bin/apache-tomcat-9.0.122.zip
+        sha512: 5e004cf0b80dfd2465182130a11834190ab9ea98811d37c178afa1c07ddfb5a1e4defd7e52baa377088f1774bf9a2fe9006d17cc2a98af31c2a1ae25e3204a6f
+  - version: 9.0.123
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.123/bin/apache-tomcat-9.0.123.zip
+        sha512: 79a498d57c8ac5d704aebd5c2ea0aa2adaa3fa7c75149d007f1e33bc7ce79a30240d774d807b6cf3a63a4228cad847785ccd960c841580a2ecab5b30e5d68422
+  - version: 10.1.56
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.56/bin/apache-tomcat-10.1.56.zip
+        sha512: 576329540017d4841744a21a1f50247696b1ce75a5236e2664610e7cfaf16fcb63979015571d614e378313c638ae7cdd8483f8f25cbee7e1cce2af380690da9b
+  - version: 10.1.57
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.57/bin/apache-tomcat-10.1.57.zip
+        sha512: a8cab0ef8ab0868b80f69039697dc8b436bb676e8f9c449f5ba49da47cd4fc45499124b8b1f69ab31e0b71438a45fabc3155f3e406a9abac92827d77cabcc493
+  - version: 10.1.59
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.59/bin/apache-tomcat-10.1.59.zip
+        sha512: ac66a1d7893df5fea8b32e293512566aa2ea8b1c123eb41b53d0aac44e68da5ad3a35b68e624ce8881f7884dfa1441ea7dc083fe759b604597f6ac306db312aa
+  - version: 10.1.60
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.60/bin/apache-tomcat-10.1.60.zip
+        sha512: 706e0fbb79bc476eba9524c251280259e56b56bcd1298b11fc77a60818ab4d24d811420f3c247699a57b8db1418fd474868a7b01ca43d6f4bff788b4e1a0c201
+  - version: 10.1.61
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.61/bin/apache-tomcat-10.1.61.zip
+        sha512: 018fca94e41e75ac74891a55894bd94f662bc838ad92a443937c169c0b1dc5617b69ceffb4e1c9f0648c4d9e5b1da7cb5f06c3ff6daab7e305fffc955f607ed4
+  - version: 11.0.23
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-11/v11.0.23/bin/apache-tomcat-11.0.23.zip
+        sha512: d6d73db331d0ac8fb246d3c12018d1fac94febd5d306121539882b5bae18b91de3170f470229fb274411ecca8832ed444b7394d8932c06d39ef94da885b03167
+  - version: 11.0.24
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-11/v11.0.24/bin/apache-tomcat-11.0.24.zip
+        sha512: d022f72307d2965e57d03b00616c51bf6054abf78b3fef4570afa8c3c8cf72fdc660f319b6e6fd4443aff31733e22377fba46d64bc8c6d8579007b8582a7f88d
+  - version: 11.0.25
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-11/v11.0.25/bin/apache-tomcat-11.0.25.zip
+        sha512: 80bc4818547903c5b1a45e18f30702309309800eda68216f9ba25fc3ddd62ad7bba47dabe82a4e0f0a0641146c7d1c7190885c6d098aae7e962b5b633acbc137
+  - version: 11.0.26
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/tomcat/tomcat-11/v11.0.26/bin/apache-tomcat-11.0.26.zip
+        sha512: d5994ebbc654fb401c1dfc8521000fee8deea811c5a9bbefca4178a26ec87c9024757274c80120c607148b6133b7427d35500c14e021d33aec7b8ed79d66105a
