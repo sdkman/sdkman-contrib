@@ -28,23 +28,27 @@ With `contrib` installed you can write a request with `contrib new` and run `con
 There are two kinds of request.
 
 - A **registration** registers a candidate, or updates the metadata of one that exists.
-- A **release** adds or overwrites versions of a registered candidate. It can also move the candidate's default version.
+- A **release** adds or overwrites versions of a candidate that already exists in State. It can also move the candidate's default version.
 
 A file is one kind, never both. A PR adds exactly one file under `requests/` and changes nothing else.
 
+### An existing candidate takes one PR
+
+If the candidate is already in SDKMAN and listed in `contrib-candidates.txt` (see below), open a PR with a **release**. No registration is needed.
+
 ### A new candidate takes two PRs
 
-1. Ask a maintainer to list your candidate in `contrib-candidates.txt` (see below).
+1. Ask a maintainer to list your candidate in `contrib-candidates.txt`.
 2. Open a PR with a **registration**. Wait for it to merge and for the apply run to succeed.
 3. Open a PR with a **release**.
 
-A release PR for a candidate that is not registered yet fails its check, because the candidate is not in the registry. Open it only after the registration is applied.
+A release PR for a candidate that does not exist in State yet fails its check. Open it only after the registration is applied.
 
 ### Listing a candidate in `contrib-candidates.txt`
 
 Only candidates listed in `contrib-candidates.txt` accept requests. A request naming any other candidate fails the check. The list holds candidates whose vendor publishes through neither State's vendor role nor the Vendor API, so a vendor stays the only writer of its own candidates.
 
-A maintainer adds the candidate before its registration PR, even when the candidate already exists. The file takes one candidate per line, exactly as State names it. Blank lines and lines starting with `#` are ignored.
+A maintainer adds the candidate before any request names it. The file takes one candidate per line, exactly as State names it. Blank lines and lines starting with `#` are ignored.
 
 `java` is never listed. DISCO owns java, and any request naming it fails the check.
 
@@ -137,7 +141,7 @@ versions:
 
 | Field | Required | Rule |
 |---|---|---|
-| `candidate` | yes | A registered candidate. |
+| `candidate` | yes | A candidate that exists in State. |
 | `versions` | yes | One or more versions. |
 | `versions[].version` | yes | A version string State accepts for this candidate. |
 | `versions[].platforms` | yes | A map from State platform id to an archive. |
