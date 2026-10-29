@@ -156,7 +156,12 @@ jobs:
         id: sha256
         run: |
           for suffix in linux-arm64.tar.gz macos-x64.tar.gz macos-arm64.tar.gz windows-x64.zip linux-x64.tar.gz; do
-            echo "${suffix%%.*}=$(sha256sum "packages/contrib-$VERSION-$suffix" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+            hash=$(sha256sum "packages/contrib-$VERSION-$suffix" | cut -d' ' -f1)
+            if [ -z "$hash" ]; then
+              echo "no sha256 for contrib-$VERSION-$suffix" >&2
+              exit 1
+            fi
+            echo "${suffix%%.*}=$hash" >> "$GITHUB_OUTPUT"
           done
       - name: Publish LINUX_ARM64
         uses: sdkman/sdkman-release-action@v1
