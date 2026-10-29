@@ -158,18 +158,16 @@ it has just applied checks clean.)*
    in `Cargo.toml`, and the release reads it from there: the tag is `v<version>`, and the
    State version and the `contrib-<version>` base directory are `<version>`.
 3. **`contrib` publishes itself as a vendor.** Its releases reach State through the vendor
-   role, and `contrib` is never listed in `contrib-candidates.txt`.
-4. **A release reaches SDKMAN only when it is complete.** A release posts all five rows
-   without tags, then tags them `stable`, with `LINUX_X64` last. If any step fails before that
-   last tag, the workflow deletes the rows it posted for that version (the vendor role may
-   delete its own candidate's versions) and fails. The default moves only with the last tag.
-   *(Assumption, planning pass 2026-10-25: State refuses to delete a row that holds a tag. So
-   the rollback first moves each `stable` it moved back to the version that held it, or
-   removes it where none did. It deletes only rows that did not exist before the run, so
-   re-running a published release never deletes it.)* *(Assumption, planning pass 2026-10-25:
-   State's reads are cached at the edge for up to ten minutes, so the publish reads past that
-   cache. A stale answer would restore the wrong version, or delete a row that existed before
-   the run.)*
+   role, with [`sdkman/sdkman-release-action`](https://github.com/sdkman/sdkman-release-action),
+   and `contrib` is never listed in `contrib-candidates.txt`.
+4. **The default moves last.** A release posts one row per platform, each tagged `stable`,
+   with `LINUX_X64` last, because State moves the default with `LINUX_X64`'s `stable` tag. The
+   first failing step fails the release and posts nothing after it, so the default stays on
+   the previous version. Platforms posted before the failure already offer the new version,
+   which is safe because each row's archive is on the GitHub release before any row is
+   posted. Re-running the job completes the release, because each post is an upsert. The
+   archives are built by the `build` job, so the release trusts their layout and does not
+   inspect them; it only refuses to post a row whose archive it could not hash.
 5. **Redirect chains stay on `https`.** A chain with any non-`https` hop fails the URL rule.
    A chain that never ends in a `200` fails it too, as does one with more than 5 redirects. A
    written URL whose path contains `/releases/latest/` fails the URL rule. The written URL
@@ -204,9 +202,10 @@ it has just applied checks clean.)*
 
 - [ ] Once Marco has made the hooks change and created the candidate: on a SDKMAN installed before `contrib` was registered, `sdk update` followed by `sdk install contrib` installs a working `contrib` on Linux x64, Linux ARM64, macOS x64, macOS ARM64 and Windows x64, and `sdk upgrade contrib` moves to a newer release
 - [ ] After that one-time setup, a `cargo release` on `main` publishes it to State through the vendor role as the new default `contrib` version for all five platforms, with no manual step
-- [ ] Every published `contrib` archive passes SDKMAN's well-formed archive rules
+- [ ] Every published `contrib` archive is built in SDKMAN's well-formed layout by the `build` job
 - [ ] `contrib` is not listed in `contrib-candidates.txt`
-- [ ] A release that fails to publish any platform leaves the previous default in place and shows as failed
+- [ ] A release that fails to publish any platform leaves the previous default in place and shows as failed, and re-running it completes the release
+- [ ] A release whose archive cannot be hashed fails before it posts any row
 - [ ] Each release also carries a working binary per platform on GitHub
 - [ ] The README presents `sdk install contrib` as the recommended install path, names the GitHub binaries as the fallback, and shows how to confirm the install worked
 - [ ] The README mentions `cargo install --git` as a side note for contributors who already have Rust
