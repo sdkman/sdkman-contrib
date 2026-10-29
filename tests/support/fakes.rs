@@ -1,12 +1,12 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::File;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use sdkman_contrib::check_digests::{CheckDigests, DigestError, DigestRow, DigestSource};
 use sdkman_contrib::fetch::{ArchiveSource, Download, FetchError, Hop, HttpGet, follow_redirects};
-use sdkman_contrib::state_api::{Answer, StateValidator, StateWriter, VendorState, WriteError};
+use sdkman_contrib::state_api::{Answer, StateValidator, StateWriter, WriteError};
 use sdkman_contrib::state_body::{CandidateBody, VersionBody};
 
 /// Answers a URL with the bytes of a local file, and `404` for any URL it was not given.
@@ -239,142 +239,5 @@ impl DigestSource for FakeDigests {
     fn reviewed_digests(&self, commit: &str) -> Result<CheckDigests, DigestError> {
         self.lookups.borrow_mut().push(commit.to_owned());
         self.answer.clone()
-    }
-}
-
-/// Holds rows and `stable` tags like State, and logs each call as `<call> <platform>`.
-/// Fails the one call it was told to, and refuses to delete a row that holds `stable`.
-#[derive(Default)]
-pub struct FakeVendorState {
-    rows: RefCell<BTreeSet<(String, String)>>,
-    stable: RefCell<BTreeMap<String, String>>,
-    posted: RefCell<Vec<VersionBody>>,
-    calls: RefCell<Vec<String>>,
-    failing: RefCell<Option<String>>,
-}
-
-impl FakeVendorState {
-    pub fn with_row(self, version: &str, platform: &str) -> Self {
-        self.rows
-            .borrow_mut()
-            .insert((version.to_owned(), platform.to_owned()));
-        self
-    }
-
-    pub fn with_stable(self, platform: &str, version: &str) -> Self {
-        self.stable
-            .borrow_mut()
-            .insert(platform.to_owned(), version.to_owned());
-        self.with_row(version, platform)
-    }
-
-    pub fn failing_on(self, call: &str, platform: &str) -> Self {
-        self.failing.replace(Some(format!("{call} {platform}")));
-        self
-    }
-
-    pub fn rows(&self) -> BTreeSet<(String, String)> {
-        self.rows.borrow().clone()
-    }
-
-    pub fn stable(&self) -> BTreeMap<String, String> {
-        self.stable.borrow().clone()
-    }
-
-    pub fn posted(&self) -> Vec<VersionBody> {
-        self.posted.borrow().clone()
-    }
-
-    pub fn calls(&self) -> Vec<String> {
-        self.calls.borrow().clone()
-    }
-
-    fn record(&self, call: &str, platform: &str) -> Result<(), WriteError> {
-        let entry = format!("{call} {platform}");
-        self.calls.borrow_mut().push(entry.clone());
-        if self.failing.borrow().as_deref() == Some(entry.as_str()) {
-            return Err(WriteError::Refused {
-                status: 500,
-                messages: vec![format!("{entry} failed on demand")],
-            });
-        }
-        Ok(())
-    }
-}
-
-impl StateWriter for FakeVendorState {
-    fn post_candidate(&self, _body: &CandidateBody) -> Result<(), WriteError> {
-        Ok(())
-    }
-
-    fn post_version(&self, body: &VersionBody) -> Result<(), WriteError> {
-        self.record("post_version", &body.platform)?;
-        self.posted.borrow_mut().push(body.clone());
-        self.rows
-            .borrow_mut()
-            .insert((body.version.clone(), body.platform.clone()));
-        Ok(())
-    }
-}
-
-impl VendorState for FakeVendorState {
-    fn stable_version(
-        &self,
-        _candidate: &str,
-        platform: &str,
-    ) -> Result<Option<String>, WriteError> {
-        self.record("stable_version", platform)?;
-        Ok(self.stable.borrow().get(platform).cloned())
-    }
-
-    fn has_version(
-        &self,
-        _candidate: &str,
-        version: &str,
-        platform: &str,
-    ) -> Result<bool, WriteError> {
-        self.record("has_version", platform)?;
-        Ok(self
-            .rows
-            .borrow()
-            .contains(&(version.to_owned(), platform.to_owned())))
-    }
-
-    fn tag_stable(
-        &self,
-        _candidate: &str,
-        version: &str,
-        platform: &str,
-    ) -> Result<(), WriteError> {
-        self.record("tag_stable", platform)?;
-        self.stable
-            .borrow_mut()
-            .insert(platform.to_owned(), version.to_owned());
-        Ok(())
-    }
-
-    fn untag_stable(&self, _candidate: &str, platform: &str) -> Result<(), WriteError> {
-        self.record("untag_stable", platform)?;
-        self.stable.borrow_mut().remove(platform);
-        Ok(())
-    }
-
-    fn delete_version(
-        &self,
-        _candidate: &str,
-        version: &str,
-        platform: &str,
-    ) -> Result<(), WriteError> {
-        self.record("delete_version", platform)?;
-        if self.stable.borrow().get(platform).map(String::as_str) == Some(version) {
-            return Err(WriteError::Refused {
-                status: 409,
-                messages: vec![format!("{version} of {platform} holds a tag")],
-            });
-        }
-        self.rows
-            .borrow_mut()
-            .remove(&(version.to_owned(), platform.to_owned()));
-        Ok(())
     }
 }

@@ -143,29 +143,79 @@ jobs:
     needs: [verify, github-release]
     runs-on: ubuntu-latest
     environment: release
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      URL_BASE: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
 
     steps:
       - name: Download release packages
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir packages
-      - name: Extract the Linux x64 binary
-        env:
-          VERSION: ${{ needs.verify.outputs.version }}
+      - name: Hash release packages
+        id: sha256
         run: |
-          tar -xzf "packages/contrib-$VERSION-linux-x64.tar.gz"
-          reported=$("contrib-$VERSION/bin/contrib" --version)
-          if [ "$reported" != "contrib $VERSION" ]; then
-            echo "binary reports '$reported', expected 'contrib $VERSION'" >&2
-            exit 1
-          fi
-      - name: Publish to State
-        env:
-          VERSION: ${{ needs.verify.outputs.version }}
-          VENDOR_EMAIL: ${{ secrets.VENDOR_EMAIL }}
-          VENDOR_PASSWORD: ${{ secrets.VENDOR_PASSWORD }}
-          CONTRIB_STATE_URL: ${{ vars.CONTRIB_STATE_URL }}
-        run: |
-          "contrib-$VERSION/bin/contrib" publish \
-            --url-base "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
-            packages
+          for suffix in linux-arm64.tar.gz macos-x64.tar.gz macos-arm64.tar.gz windows-x64.zip linux-x64.tar.gz; do
+            echo "${suffix%%.*}=$(sha256sum "packages/contrib-$VERSION-$suffix" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          done
+      - name: Publish LINUX_ARM64
+        uses: sdkman/sdkman-release-action@v1
+        with:
+          email: ${{ secrets.VENDOR_EMAIL }}
+          password: ${{ secrets.VENDOR_PASSWORD }}
+          backend: ${{ vars.CONTRIB_STATE_URL || 'https://state.sdkman.io' }}
+          candidate: contrib
+          version: ${{ env.VERSION }}
+          platform: LINUX_ARM64
+          url: ${{ env.URL_BASE }}/contrib-${{ env.VERSION }}-linux-arm64.tar.gz
+          checksum-sha-256: ${{ steps.sha256.outputs.linux-arm64 }}
+          tags: stable
+      - name: Publish MAC_X64
+        uses: sdkman/sdkman-release-action@v1
+        with:
+          email: ${{ secrets.VENDOR_EMAIL }}
+          password: ${{ secrets.VENDOR_PASSWORD }}
+          backend: ${{ vars.CONTRIB_STATE_URL || 'https://state.sdkman.io' }}
+          candidate: contrib
+          version: ${{ env.VERSION }}
+          platform: MAC_X64
+          url: ${{ env.URL_BASE }}/contrib-${{ env.VERSION }}-macos-x64.tar.gz
+          checksum-sha-256: ${{ steps.sha256.outputs.macos-x64 }}
+          tags: stable
+      - name: Publish MAC_ARM64
+        uses: sdkman/sdkman-release-action@v1
+        with:
+          email: ${{ secrets.VENDOR_EMAIL }}
+          password: ${{ secrets.VENDOR_PASSWORD }}
+          backend: ${{ vars.CONTRIB_STATE_URL || 'https://state.sdkman.io' }}
+          candidate: contrib
+          version: ${{ env.VERSION }}
+          platform: MAC_ARM64
+          url: ${{ env.URL_BASE }}/contrib-${{ env.VERSION }}-macos-arm64.tar.gz
+          checksum-sha-256: ${{ steps.sha256.outputs.macos-arm64 }}
+          tags: stable
+      - name: Publish WINDOWS_X64
+        uses: sdkman/sdkman-release-action@v1
+        with:
+          email: ${{ secrets.VENDOR_EMAIL }}
+          password: ${{ secrets.VENDOR_PASSWORD }}
+          backend: ${{ vars.CONTRIB_STATE_URL || 'https://state.sdkman.io' }}
+          candidate: contrib
+          version: ${{ env.VERSION }}
+          platform: WINDOWS_X64
+          url: ${{ env.URL_BASE }}/contrib-${{ env.VERSION }}-windows-x64.zip
+          checksum-sha-256: ${{ steps.sha256.outputs.windows-x64 }}
+          tags: stable
+      # State moves the default with the LINUX_X64 `stable` tag, so LINUX_X64 goes last.
+      - name: Publish LINUX_X64
+        uses: sdkman/sdkman-release-action@v1
+        with:
+          email: ${{ secrets.VENDOR_EMAIL }}
+          password: ${{ secrets.VENDOR_PASSWORD }}
+          backend: ${{ vars.CONTRIB_STATE_URL || 'https://state.sdkman.io' }}
+          candidate: contrib
+          version: ${{ env.VERSION }}
+          platform: LINUX_X64
+          url: ${{ env.URL_BASE }}/contrib-${{ env.VERSION }}-linux-x64.tar.gz
+          checksum-sha-256: ${{ steps.sha256.outputs.linux-x64 }}
+          tags: stable

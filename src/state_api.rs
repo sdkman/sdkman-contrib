@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -60,25 +59,6 @@ pub trait StateWriter {
     fn post_version(&self, body: &VersionBody) -> Result<(), WriteError>;
 }
 
-pub trait VendorState: StateWriter {
-    fn stable_version(&self, candidate: &str, platform: &str)
-    -> Result<Option<String>, WriteError>;
-    fn has_version(
-        &self,
-        candidate: &str,
-        version: &str,
-        platform: &str,
-    ) -> Result<bool, WriteError>;
-    fn tag_stable(&self, candidate: &str, version: &str, platform: &str) -> Result<(), WriteError>;
-    fn untag_stable(&self, candidate: &str, platform: &str) -> Result<(), WriteError>;
-    fn delete_version(
-        &self,
-        candidate: &str,
-        version: &str,
-        platform: &str,
-    ) -> Result<(), WriteError>;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteError {
     Login(String),
@@ -107,12 +87,6 @@ impl std::error::Error for WriteError {}
 pub struct Credentials {
     pub email: String,
     pub password: String,
-}
-
-#[derive(Clone, Copy)]
-enum Verb {
-    Post,
-    Delete,
 }
 
 pub struct HttpState {
@@ -182,20 +156,10 @@ impl HttpState {
     }
 
     fn write(&self, path: &str, body: &impl Serialize, accepted: &[u16]) -> Result<(), WriteError> {
-        self.write_with(Verb::Post, path, body, accepted)
-    }
-
-    fn write_with(
-        &self,
-        verb: Verb,
-        path: &str,
-        body: &impl Serialize,
-        accepted: &[u16],
-    ) -> Result<(), WriteError> {
-        let mut answer = self.send_authorised(verb, path, body)?;
+        let mut answer = self.send_authorised(path, body)?;
         if answer.status == 401 {
             self.obtain_token().map_err(WriteError::Login)?;
-            answer = self.send_authorised(verb, path, body)?;
+            answer = self.send_authorised(path, body)?;
         }
         if accepted.contains(&answer.status) {
             Ok(())
@@ -207,14 +171,9 @@ impl HttpState {
         }
     }
 
-    fn send_authorised(
-        &self,
-        verb: Verb,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<Answer, WriteError> {
+    fn send_authorised(&self, path: &str, body: &impl Serialize) -> Result<Answer, WriteError> {
         let token = self.held_or_new_token().map_err(WriteError::Login)?;
-        self.send(verb, path, body, Some(&token))
+        self.post(path, body, Some(&token))
             .map_err(WriteError::Transport)
     }
 
@@ -224,34 +183,14 @@ impl HttpState {
         body: &impl Serialize,
         token: Option<&str>,
     ) -> Result<Answer, String> {
-        self.send(Verb::Post, path, body, token)
-    }
-
-    fn send(
-        &self,
-        verb: Verb,
-        path: &str,
-        body: &impl Serialize,
-        token: Option<&str>,
-    ) -> Result<Answer, String> {
         let url = format!("{}{path}", self.base_url);
-        let mut response = match verb {
-            Verb::Post => {
-                let mut request = self.agent.post(&url);
-                if let Some(token) = token {
-                    request = request.header("Authorization", format!("Bearer {token}"));
-                }
-                request.send_json(body)
-            }
-            Verb::Delete => {
-                let mut request = self.agent.delete(&url).force_send_body();
-                if let Some(token) = token {
-                    request = request.header("Authorization", format!("Bearer {token}"));
-                }
-                request.send_json(body)
-            }
+        let mut request = self.agent.post(&url);
+        if let Some(token) = token {
+            request = request.header("Authorization", format!("Bearer {token}"));
         }
-        .map_err(|e| format!("{url} could not be reached: {e}"))?;
+        let mut response = request
+            .send_json(body)
+            .map_err(|e| format!("{url} could not be reached: {e}"))?;
         answer_of(&url, &mut response)
     }
 }
@@ -264,44 +203,6 @@ fn answer_of(url: &str, response: &mut ureq::http::Response<ureq::Body>) -> Resu
         .map_err(|e| format!("{url} answer could not be read: {e}"))?;
     let body = serde_json::from_str(&text).unwrap_or(Value::Null);
     Ok(Answer { status, body })
-}
-
-static CACHE_BUSTERS: AtomicU64 = AtomicU64::new(0);
-
-fn cache_buster() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    let sequence = CACHE_BUSTERS.fetch_add(1, Ordering::Relaxed);
-    format!("{nanos}-{sequence}")
-}
-
-impl HttpState {
-    fn get_past_cache(&self, path_and_query: &str) -> Result<Answer, WriteError> {
-        let separator = if path_and_query.contains('?') {
-            '&'
-        } else {
-            '?'
-        };
-        let url = format!(
-            "{}{path_and_query}{separator}_cb={}",
-            self.base_url,
-            cache_buster()
-        );
-        let mut response = self
-            .agent
-            .get(&url)
-            .call()
-            .map_err(|e| WriteError::Transport(format!("{url} could not be reached: {e}")))?;
-        answer_of(&url, &mut response).map_err(WriteError::Transport)
-    }
-}
-
-fn refused(answer: &Answer) -> WriteError {
-    WriteError::Refused {
-        status: answer.status,
-        messages: answer.messages(),
-    }
 }
 
 impl StateValidator for HttpState {
@@ -321,87 +222,5 @@ impl StateWriter for HttpState {
 
     fn post_version(&self, body: &VersionBody) -> Result<(), WriteError> {
         self.write("/versions", body, &[204])
-    }
-}
-
-impl VendorState for HttpState {
-    fn stable_version(
-        &self,
-        candidate: &str,
-        platform: &str,
-    ) -> Result<Option<String>, WriteError> {
-        let answer = self.get_past_cache(&format!(
-            "/versions/{candidate}/tags/stable?platform={platform}"
-        ))?;
-        match answer.status {
-            200 => answer
-                .body
-                .get("version")
-                .and_then(Value::as_str)
-                .map(|version| Some(version.to_owned()))
-                .ok_or_else(|| refused(&answer)),
-            404 => Ok(None),
-            _ => Err(refused(&answer)),
-        }
-    }
-
-    fn has_version(
-        &self,
-        candidate: &str,
-        version: &str,
-        platform: &str,
-    ) -> Result<bool, WriteError> {
-        let answer = self.get_past_cache(&format!(
-            "/versions/{candidate}/{version}?platform={platform}"
-        ))?;
-        match answer.status {
-            200 => Ok(true),
-            404 => Ok(false),
-            _ => Err(refused(&answer)),
-        }
-    }
-    fn tag_stable(&self, candidate: &str, version: &str, platform: &str) -> Result<(), WriteError> {
-        self.write(
-            "/versions/tags",
-            &serde_json::json!({
-                "candidate": candidate,
-                "version": version,
-                "platform": platform,
-                "tag": "stable",
-            }),
-            &[204],
-        )
-    }
-
-    fn untag_stable(&self, candidate: &str, platform: &str) -> Result<(), WriteError> {
-        self.write_with(
-            Verb::Delete,
-            "/versions/tags",
-            &serde_json::json!({
-                "candidate": candidate,
-                "platform": platform,
-                "tag": "stable",
-            }),
-            &[204, 404],
-        )
-    }
-
-    fn delete_version(
-        &self,
-        candidate: &str,
-        version: &str,
-        platform: &str,
-    ) -> Result<(), WriteError> {
-        self.write_with(
-            Verb::Delete,
-            "/versions",
-            &serde_json::json!({
-                "candidate": candidate,
-                "version": version,
-                "platform": platform,
-                "distribution": null,
-            }),
-            &[204, 404],
-        )
     }
 }
