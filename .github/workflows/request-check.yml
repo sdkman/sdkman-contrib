@@ -29,6 +29,7 @@ jobs:
           path: pr
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
       - name: Classify change set
         id: classify
         working-directory: pr
