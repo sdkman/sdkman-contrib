@@ -1,0 +1,8 @@
+candidate: ant
+default: 1.10.18
+versions:
+  - version: 1.10.18
+    platforms:
+      UNIVERSAL:
+        url: https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.18-bin.zip
+        sha512: f86d7b263bc7c6903a91532943f1c8ecccc17dd999851a796617e79795908d7a666cbe999b9ecf06735cc7e830f50dca9f49b37bb5f6f02a0a3803cd22b558b0
